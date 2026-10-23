@@ -30,6 +30,12 @@ sudo bash mybox-install.sh install
 没有菜单、没有 Argo 隧道、没有 WARP、没有 GitLab 订阅托管、没有 TG 推送、
 没有聚合订阅全家桶、没有自更新、没有快捷命令、没有定时重启 cron。
 
+## 许可
+
+MIT，见 [LICENSE](LICENSE)。可自由使用、修改与分发。
+本脚本与 sing-box 官方（SagerNet）及被拆解的原脚本作者无隶属关系；
+在本机以 root 运行任何一键脚本前，请先通读脚本内容。
+
 ## 注意
 
 - 自签证书 CN 默认 www.bing.com、REALITY SNI 默认 apple.com，均可用环境变量改

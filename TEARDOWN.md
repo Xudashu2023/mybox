@@ -1,6 +1,6 @@
 # 甬哥 sing-box 一键脚本拆解报告
 
-对象：yonggekkk/sing-box-yg 的 sb.sh（与 o-vip 上 /etc/s-box 落地结构一致）
+对象：yonggekkk/sing-box-yg 的 sb.sh（并与一台实际部署该脚本的服务器上的 /etc/s-box 落地结构相互印证）
 规模：4468 行 / 约 149 KB / 单文件 bash
 日期：2026-10-23
 
@@ -26,13 +26,13 @@ github.com、raw.githubusercontent.com、gitlab.com、cdn.jsdelivr.net、data.js
 www.cloudflare.com、api.cloudflareclient.com、ip.fm、myip.ipip.net、
 api.telegram.org、mirrors.aliyun.com、ygkkk.blogspot.com（作者博客）等。
 
-## 三、在 o-vip 上的落地痕迹（与今日盘点相互印证）
+## 三、在实际部署服务器上的落地痕迹（盘点印证）
 
 - /etc/s-box/ 下几十个文件：sb.json / sb10.json / sb11.json、sing-box 内核、cert.pem、private.key、public.key、SHA256.txt，以及大量 *_client*.txt、clmi.yaml、jhdy.txt、各类 .log 与 token 文件
 - /root 下有 sbyg_update、warp_update、geoip.db、geosite.db
 - /usr/local/bin 有 singbox-healthcheck
-- 五个协议共用同一个 UUID/密码（OR.yaml 中 VIP 五节点一致），一个泄露等于全协议泄露
-- 对外开放 5 个协议端口 + 后加的中转 40137，与脚本默认布局一致
+- 五个协议共用同一个 UUID/密码，一个泄露等于全协议泄露
+- 对外开放的协议端口与脚本默认布局一致
 
 ## 四、个人纯净版可保留/应剔除
 
@@ -51,6 +51,6 @@ api.telegram.org、mirrors.aliyun.com、ygkkk.blogspot.com（作者博客）等�
 
 ## 五、结论
 
-能做，且不难：这台机的服务端配置结构今天已在中转改造中实际动过并验证可用，
-纯净版等于把 4468 行砍到只剩装内核 + 写配置 + 起服务三步。保持原端口与协议不变，
-现有 Clash 订阅可无缝继续用；若同时更换为独立凭据，则需要同步更新订阅文件。
+能做，且不难：纯净版等于把 4468 行砍到只剩装内核 + 写配置 + 起服务三步。
+保持原端口与协议不变，现有客户端订阅可无缝继续用；
+若同时更换为独立凭据，则需要同步更新订阅文件。
