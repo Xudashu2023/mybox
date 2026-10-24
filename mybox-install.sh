@@ -5,13 +5,14 @@
 # 只做三件事：装内核、写配置、起服务。
 # 没有菜单、没有订阅托管、没有 Argo/WARP/TG 推送、没有自更新、没有定时重启。
 #
-# 协议（端口保持与现有订阅一致，凭据每个协议独立生成）：
+# 协议（凭据每个协议独立生成；端口首次安装随机生成并持久化，之后保持不变）：
 #   VLESS-REALITY (TCP) / VMess-WS (TCP) / AnyTLS (TCP)
 #   Hysteria2 (UDP)     / TUIC (UDP)
 #
 # 用法：
-#   sudo bash mybox-install.sh install      安装或更新（可重复运行，凭据不重置）
-#   sudo bash mybox-install.sh uninstall    卸载服务与本脚本生成的文件
+#   sudo bash mybox-install.sh install      安装或更新（可重复运行，凭据/端口不重置）
+#   sudo bash mybox-install.sh uninstall    普通卸载：服务、配置、凭据、内核（保留面板/脚本）
+#   sudo bash mybox-install.sh purge        完全卸载：以上全删 + 面板、脚本、备份、BBR 配置
 #        bash mybox-install.sh print-config 只打印将要生成的 config.json（免 root 预览）
 #        bash mybox-install.sh show-links   根据已保存凭据重新打印分享链接
 #
@@ -35,11 +36,13 @@ KEY_FILE="${KEY_FILE:-$DIR/private.key}"
 BIN="/usr/local/bin/sing-box"
 UNIT="/etc/systemd/system/mybox.service"
 
-PORT_VLESS="${PORT_VLESS:-40136}"
-PORT_VMESS="${PORT_VMESS:-2082}"
-PORT_ANYTLS="${PORT_ANYTLS:-20917}"
-PORT_HY2="${PORT_HY2:-41413}"
-PORT_TUIC="${PORT_TUIC:-59899}"
+# 端口不在这里写死：resolve_ports 按 环境变量 > ports.env > 现有 config.json > 随机 解析
+PORT_VLESS="${PORT_VLESS:-}"
+PORT_VMESS="${PORT_VMESS:-}"
+PORT_ANYTLS="${PORT_ANYTLS:-}"
+PORT_HY2="${PORT_HY2:-}"
+PORT_TUIC="${PORT_TUIC:-}"
+PORTS_FILE="$DIR/ports.env"
 REALITY_SNI="${REALITY_SNI:-apple.com}"
 CERT_CN="${CERT_CN:-www.bing.com}"
 
@@ -76,6 +79,81 @@ gen_uuid() {
   if [ -x "$BIN" ]; then "$BIN" generate uuid;
   elif [ -f /proc/sys/kernel/random/uuid ]; then cat /proc/sys/kernel/random/uuid;
   else python3 -c 'import uuid;print(uuid.uuid4())'; fi
+}
+
+# ---------- 端口解析：环境变量 > ports.env > 现有 config.json > 随机（仅首次安装） ----------
+cfg_port() { # $1=协议类型 -> 从现有 config.json 读 listen_port
+  [ -f "$CONF" ] || return 0
+  python3 - "$CONF" "$1" 2>/dev/null <<'PY' || true
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+    for ib in cfg.get("inbounds", []):
+        if ib.get("type") == sys.argv[2]:
+            print(ib.get("listen_port", "")); break
+except Exception:
+    pass
+PY
+}
+
+file_port() { # $1=变量名 -> 从 ports.env 读
+  [ -f "$PORTS_FILE" ] || return 0
+  sed -n "s/^$1='\([0-9][0-9]*\)'.*/\1/p" "$PORTS_FILE" | tail -n 1
+}
+
+rand_port() { # 20000-60000 内随机、未被本机监听、未与已定端口重复
+  local p i
+  for i in $(seq 1 60); do
+    p=$(( (RANDOM * 32768 + RANDOM) % 40001 + 20000 ))
+    case " $USED_PORTS " in *" $p "*) continue ;; esac
+    if have ss && ss -tuln 2>/dev/null | grep -q ":$p[[:space:]]"; then continue; fi
+    echo "$p"; return 0
+  done
+  return 1
+}
+
+resolve_ports() { # $1: install=缺失时随机生成；clean=缺失时回落旧固定端口（预览/卸载用）
+  local mode="${1:-install}"
+  PORT_VLESS="${PORT_VLESS:-$(file_port PORT_VLESS)}"
+  PORT_VMESS="${PORT_VMESS:-$(file_port PORT_VMESS)}"
+  PORT_ANYTLS="${PORT_ANYTLS:-$(file_port PORT_ANYTLS)}"
+  PORT_HY2="${PORT_HY2:-$(file_port PORT_HY2)}"
+  PORT_TUIC="${PORT_TUIC:-$(file_port PORT_TUIC)}"
+  [ -n "$PORT_VLESS" ]  || PORT_VLESS="$(cfg_port vless)"
+  [ -n "$PORT_VMESS" ]  || PORT_VMESS="$(cfg_port vmess)"
+  [ -n "$PORT_ANYTLS" ] || PORT_ANYTLS="$(cfg_port anytls)"
+  [ -n "$PORT_HY2" ]     || PORT_HY2="$(cfg_port hysteria2)"
+  [ -n "$PORT_TUIC" ]    || PORT_TUIC="$(cfg_port tuic)"
+  if [ "$mode" = "install" ]; then
+    USED_PORTS="22 $PORT_VLESS $PORT_VMESS $PORT_ANYTLS $PORT_HY2 $PORT_TUIC"
+    local var
+    for var in PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC; do
+      if [ -z "${!var}" ]; then
+        printf -v "$var" '%s' "$(rand_port)"
+        USED_PORTS="$USED_PORTS ${!var}"
+        log "首次安装：$var 随机生成 ${!var}"
+      fi
+    done
+    { [ -n "$PORT_VLESS" ] && [ -n "$PORT_VMESS" ] && [ -n "$PORT_ANYTLS" ] \
+      && [ -n "$PORT_HY2" ] && [ -n "$PORT_TUIC" ]; } || die "端口解析失败"
+  else
+    PORT_VLESS="${PORT_VLESS:-40136}"; PORT_VMESS="${PORT_VMESS:-2082}"
+    PORT_ANYTLS="${PORT_ANYTLS:-20917}"; PORT_HY2="${PORT_HY2:-41413}"
+    PORT_TUIC="${PORT_TUIC:-59899}"
+  fi
+  export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC
+}
+
+save_ports() {
+  umask 077
+  {
+    printf "PORT_VLESS='%s'\n"  "$PORT_VLESS"
+    printf "PORT_VMESS='%s'\n"  "$PORT_VMESS"
+    printf "PORT_ANYTLS='%s'\n" "$PORT_ANYTLS"
+    printf "PORT_HY2='%s'\n"    "$PORT_HY2"
+    printf "PORT_TUIC='%s'\n"   "$PORT_TUIC"
+  } > "$PORTS_FILE"
+  chmod 600 "$PORTS_FILE"
 }
 
 # ---------- 凭据：首次生成并落盘（600），之后重跑直接复用 ----------
@@ -355,8 +433,10 @@ do_install() {
   need_root install
   install_deps
   mkdir -p "$DIR" "$DIR/backup"
+  resolve_ports install
   install_core
   load_or_create_creds
+  save_ports
   make_cert
   if [ -f "$CONF" ]; then
     cp -a "$CONF" "$DIR/backup/config-$(date +%Y%m%d-%H%M%S).json"
@@ -382,11 +462,7 @@ do_install() {
   log "完成。链接与 Clash 配置在 $DIR/client/（600），凭据总钥匙在 $CREDS（600）"
 }
 
-do_uninstall() {
-  need_root uninstall
-  systemctl disable --now mybox 2>/dev/null || true
-  rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true
-  rm -f "$BIN"
+close_firewall() {
   if have ufw; then
     ufw delete allow "$PORT_VLESS/tcp"  >/dev/null 2>&1 || true
     ufw delete allow "$PORT_VMESS/tcp"  >/dev/null 2>&1 || true
@@ -394,11 +470,43 @@ do_uninstall() {
     ufw delete allow "$PORT_HY2/udp"     >/dev/null 2>&1 || true
     ufw delete allow "$PORT_TUIC/udp"   >/dev/null 2>&1 || true
   fi
+}
+
+do_uninstall() {
+  need_root uninstall
+  resolve_ports clean   # 先按 ports.env/config 读出实际端口，再删文件（保证 UFW 规则删对）
+  systemctl disable --now mybox 2>/dev/null || true
+  rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true
+  systemctl reset-failed mybox 2>/dev/null || true
+  rm -f "$BIN" "$BIN.bak"
+  close_firewall
   rm -rf "$DIR"
-  log "已卸载：服务、二进制、$DIR 已删除（如另有备份请自行清理）"
+  log "已卸载：服务、内核、$DIR（配置/凭据/端口）已删除；面板命令与安装脚本保留，可随时重装"
+}
+
+do_purge() { # 完全卸载：连面板、脚本、备份、BBR 持久化一并清除
+  need_root purge
+  if [ "${1:-}" != "--yes" ] && [ -t 0 ]; then
+    local ans
+    printf '完全卸载将删除 mybox 的一切（服务/配置/凭据/内核/面板/脚本/备份/BBR 配置），不可恢复。输入 PURGE 确认：'
+    read -r ans || exit 1
+    [ "$ans" = "PURGE" ] || { log "已取消"; exit 0; }
+  fi
+  resolve_ports clean
+  systemctl disable --now mybox 2>/dev/null || true
+  rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true
+  systemctl reset-failed mybox 2>/dev/null || true
+  rm -f "$BIN" "$BIN.bak" /usr/local/bin/mybox /root/mybox-install.sh /root/mybox-panel.sh
+  close_firewall
+  rm -rf "$DIR" /root/mybox-backups
+  rm -f /etc/sysctl.d/99-mybox-bbr.conf /etc/modules-load.d/mybox-bbr.conf
+  sysctl -w net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1 || true
+  sysctl -w net.core.default_qdisc=fq_codel >/dev/null 2>&1 || true
+  log "完全卸载完成：mybox 服务、配置、凭据、内核、面板命令、脚本、备份与 BBR 配置均已清除"
 }
 
 do_print_config() {
+  resolve_ports clean
   # 免 root 预览：用临时凭据生成配置打到标准输出，不写盘、不碰系统
   UUID_VLESS="11111111-1111-1111-1111-111111111111"
   UUID_VMESS="22222222-2222-2222-2222-222222222222"
@@ -423,6 +531,7 @@ do_print_config() {
 do_show_links() {
   [ -f "$CREDS" ] || die "尚未安装（$CREDS 不存在）"
   set -a; . "$CREDS"; set +a
+  resolve_ports clean
   export CERT_CN
   local ip; ip="$(detect_ip)"
   [ -n "$ip" ] || die "探测不到公网 IP，请用 SERVER_IP=x.x.x.x 指定"
@@ -434,8 +543,9 @@ do_show_links() {
 case "${1:-}" in
   install)      do_install ;;
   uninstall)    do_uninstall ;;
+  purge)        do_purge "${2:-}" ;;
   print-config) do_print_config ;;
   show-links)   need_root show-links; do_show_links ;;
   status)       systemctl --no-pager status mybox | head -n 12; "$BIN" check -c "$CONF" && echo "config: OK" ;;
-  *) echo "用法： $0 {install|uninstall|print-config|show-links|status}"; exit 1 ;;
+  *) echo "用法： $0 {install|uninstall|purge|print-config|show-links|status}"; exit 1 ;;
 esac

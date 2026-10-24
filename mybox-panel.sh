@@ -10,7 +10,7 @@
 # =============================================================================
 set -uo pipefail
 
-PANEL_VERSION="2.4"
+PANEL_VERSION="2.5"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -70,6 +70,8 @@ PORT_VLESS=40136; PORT_VMESS=2082; PORT_ANYTLS=20917; PORT_HY2=41413; PORT_TUIC=
 REALITY_SNI="apple.com"; CERT_CN="www.bing.com"
 SB_VERSION="1.14.3"
 [ -f "$PANEL_CONF" ] && . "$PANEL_CONF"
+# 安装脚本持久化的实际端口优先（首次安装随机生成，落在 ports.env，反映真实运行值）
+[ -f "$DIR/ports.env" ] && . "$DIR/ports.env"
 
 save_panel_conf() {
   umask 077
@@ -663,11 +665,25 @@ EOF
 }
 
 uninstall_box() {
-  warn "卸载会删除 mybox 服务、/etc/mybox 配置与凭据，五条节点链接随即作废（不可恢复）。"
-  confirm "确定卸载？" || { echo "已取消"; return 0; }
-  confirm "再确认一次：真的卸载？" || { echo "已取消"; return 0; }
-  run_script uninstall
-  echo "面板命令保留，如需删除：rm $PANEL_SELF"
+  echo "卸载分两档："
+  echo "  1. 普通卸载：删服务、配置、凭据与内核；保留面板和脚本，可随时重装"
+  echo "  2. 完全卸载：以上全删，并清除面板命令、安装脚本、备份与 BBR 配置（不留残留）"
+  local c
+  printf "请选择 [0=取消]："; read -r c || return 0
+  case "$c" in
+    1)
+      warn "普通卸载会删除 mybox 服务、/etc/mybox 配置与凭据，五条节点链接随即作废。"
+      confirm "确定普通卸载？" || { echo "已取消"; return 0; }
+      run_script uninstall ;;
+    2)
+      warn "完全卸载不可恢复：节点、面板、脚本、备份、BBR 配置全部删除。"
+      confirm "确定完全卸载？" || { echo "已取消"; return 0; }
+      confirm "再确认一次：真的完全卸载？" || { echo "已取消"; return 0; }
+      run_script purge --yes
+      ok "完全卸载完成，面板命令已一并删除，本面板退出"
+      exit 0 ;;
+    *) echo "已取消" ;;
+  esac
 }
 
 menu_list() {

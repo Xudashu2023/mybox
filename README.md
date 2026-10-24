@@ -14,14 +14,15 @@ sudo bash mybox-install.sh install
 
 ## 功能
 
-- 五协议：VLESS-REALITY (TCP 40136) / VMess-WS (TCP 2082) / AnyTLS (TCP 20917) / Hysteria2 (UDP 41413) / TUIC (UDP 59899)，端口可用环境变量改
+- 五协议：VLESS-REALITY / VMess-WS / AnyTLS / Hysteria2 / TUIC
+- 端口：首次安装在 20000-60000 随机生成、互不重复且避开已占用端口，写入 `/etc/mybox/ports.env` 持久化；重装自动复用不变更。已有旧版 config.json 的机器保持原端口。可用环境变量 `PORT_*` 或面板指定
 - 每个协议独立生成 UUID/密码（不再共用一个凭据）
 - sing-box 内核锁定 1.14.3（不追 latest），下载后按 GitHub 官方发布摘要做 SHA256 校验，取不到摘要直接中止
 - 配置写入前先 `sing-box check` 校验，并备份旧配置；重跑 install 不重置已有凭据
 - 安装产物集中：二进制 `/usr/local/bin/sing-box`、配置目录 `/etc/mybox`、systemd 服务 `mybox`
 - 凭据在 `/etc/mybox/credentials.env`（600），分享链接与 Clash 配置在 `/etc/mybox/client/`（600）
 
-子命令：`install` / `uninstall` / `print-config`（免 root 预览配置）/ `show-links`
+子命令：`install` / `uninstall`（普通卸载）/ `purge`（完全卸载）/ `print-config`（免 root 预览配置）/ `show-links` / `status`
 
 ## 许可
 
@@ -43,7 +44,7 @@ MIT，见 [LICENSE](LICENSE)。可自由使用、修改与分发。
 菜单含查看链接、终端二维码导入、全协议本机自测、服务管理、日志、
 流量统计、系统信息、修改 IP/端口/SNI、一键开启内核原版 BBR+FQ 加速、
 Sing-box 内核版本管理（更新到最新 / 指定版本切换 / 官方版本摘要校验 / 失败自动回滚）、
-从 GitHub 更新脚本与面板、备份/恢复、卸载。
+从 GitHub 更新脚本与面板、备份/恢复、两档卸载（普通卸载 / 完全卸载 purge：连面板、脚本、备份、BBR 配置一并清除）。
 
 ```bash
 curl -fsSL -o /usr/local/bin/mybox https://raw.githubusercontent.com/Xudashu2023/mybox/main/mybox-panel.sh
