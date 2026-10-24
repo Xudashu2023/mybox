@@ -10,7 +10,7 @@
 # =============================================================================
 set -uo pipefail
 
-PANEL_VERSION="2.7"
+PANEL_VERSION="2.8"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -239,7 +239,7 @@ show_links() {
 show_qr() {
   if ! command -v qrencode >/dev/null 2>&1; then
     warn "未安装 qrencode，装一下就能在终端里扫码导入："
-    echo "  apt-get install -y qrencode"
+    echo "  Debian/Ubuntu：apt-get install -y qrencode ；RHEL 系：dnf install -y qrencode"
     return 0
   fi
   [ -f "$DIR/client/links.txt" ] || { err "链接文件不存在，先跑一次菜单 1。"; return 0; }
@@ -734,6 +734,13 @@ panel_purge() { # 面板自带完全卸载：不依赖安装脚本版本，逐�
     for spec in "$PORT_VLESS/tcp" "$PORT_VMESS/tcp" "$PORT_ANYTLS/tcp" "$PORT_HY2/udp" "$PORT_TUIC/udp"; do
       ufw delete allow "$spec" >/dev/null 2>&1 || true
     done
+  fi
+  if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    local spec2
+    for spec2 in "$PORT_VLESS/tcp" "$PORT_VMESS/tcp" "$PORT_ANYTLS/tcp" "$PORT_HY2/udp" "$PORT_TUIC/udp"; do
+      firewall-cmd --permanent --remove-port="$spec2" >/dev/null 2>&1 || true
+    done
+    firewall-cmd --reload >/dev/null 2>&1 || true
   fi
   rm -rf "$DIR" /root/mybox-backups
   rm -f "$SCRIPT" /root/mybox-install.sh /root/mybox-panel.sh

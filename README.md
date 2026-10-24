@@ -32,6 +32,14 @@ curl -fsSL https://raw.githubusercontent.com/Xudashu2023/mybox/main/install.sh -
 
 一条命令装齐本体与面板，装完输 `mybox` 进面板。出站经 WARP/透明代理的机器需带上真实 IP（否则自动探测到的是代理出口）：`sudo SERVER_IP=x.x.x.x bash /tmp/mybox-all.sh`。
 
+### 支持环境（任意新服务器直接装）
+
+- 架构：x86_64 / arm64
+- 系统：带 systemd 的 Debian 11+、Ubuntu 20.04+、RHEL 8+、Rocky、AlmaLinux、CentOS Stream
+- 依赖（curl/tar/openssl/python3/ss/free 等）按 apt / dnf / yum 自动补齐
+- 本机防火墙：UFW 或 firewalld 自动放行五协议端口；**云厂商安全组仍需在控制台手动放行**（安装日志会打印随机端口号）
+- 不支持：Alpine/OpenRC、无 systemd 的容器环境（脚本会明确报错说明）
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。可自由使用、修改与分发。

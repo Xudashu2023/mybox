@@ -5,6 +5,11 @@
 # 只做三件事：装内核、写配置、起服务。
 # 没有菜单、没有订阅托管、没有 Argo/WARP/TG 推送、没有自更新、没有定时重启。
 #
+# 支持环境（通用模板）：x86_64 / arm64 + systemd 的
+#   Debian 11+ / Ubuntu 20.04+ / RHEL 8+ / Rocky / AlmaLinux / CentOS Stream
+# 依赖自动按 apt / dnf / yum 安装；本机防火墙支持 UFW 与 firewalld，
+# 云厂商安全组需自行放行（脚本会打印要放行的端口）。
+#
 # 协议（凭据每个协议独立生成；端口首次安装随机生成并持久化，之后保持不变）：
 #   VLESS-REALITY (TCP) / VMess-WS (TCP) / AnyTLS (TCP)
 #   Hysteria2 (UDP)     / TUIC (UDP)
@@ -61,18 +66,40 @@ arch_map() {
   esac
 }
 
+pkg_mgr() {
+  if have apt-get && [ -f /etc/debian_version ]; then echo apt
+  elif have dnf; then echo dnf
+  elif have yum; then echo yum
+  else echo none; fi
+}
+
+preflight() { # 通用环境检查：架构 + systemd（服务托管方式），不满足直接说明原因
+  case "$(uname -m)" in
+    x86_64|aarch64) ;;
+    *) die "不支持的架构：$(uname -m)（仅支持 x86_64 / arm64）" ;;
+  esac
+  { have systemctl && [ -d /run/systemd/system ]; } \
+    || die "未检测到 systemd：本脚本用 systemd 托管服务，请在带 systemd 的系统（Debian/Ubuntu/RHEL 系主流发行版）上运行"
+}
+
 install_deps() {
   local missing=()
-  for c in curl tar openssl python3 sha256sum; do have "$c" || missing+=("$c"); done
+  for c in curl tar openssl python3 sha256sum ss free; do have "$c" || missing+=("$c"); done
   [ "${#missing[@]}" -eq 0 ] && return 0
-  log "安装缺失依赖：${missing[*]}"
-  if [ -f /etc/debian_version ] && have apt-get; then
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-      curl tar openssl python3 ca-certificates >/dev/null
-  else
-    die "缺少依赖 ${missing[*]}，且不是 Debian/Ubuntu，请手动安装后重试"
-  fi
+  local mgr; mgr="$(pkg_mgr)"
+  log "安装缺失依赖：${missing[*]}（包管理器：$mgr）"
+  case "$mgr" in
+    apt)
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+        curl tar openssl python3 ca-certificates iproute2 procps coreutils >/dev/null ;;
+    dnf) dnf install -y -q curl tar openssl python3 ca-certificates iproute procps-ng coreutils >/dev/null ;;
+    yum) yum install -y -q curl tar openssl python3 ca-certificates iproute procps-ng coreutils >/dev/null ;;
+    *) die "缺少依赖 ${missing[*]}，且未识别到 apt/dnf/yum，请手动安装这些命令后重试：curl tar openssl python3 sha256sum ss free" ;;
+  esac
+  local still=()
+  for c in curl tar openssl python3 sha256sum ss free; do have "$c" || still+=("$c"); done
+  [ "${#still[@]}" -eq 0 ] || die "依赖仍缺失：${still[*]}，请手动安装后重试"
 }
 
 gen_uuid() {
@@ -427,14 +454,22 @@ open_firewall() {
     ufw allow "$PORT_HY2/udp"     >/dev/null
     ufw allow "$PORT_TUIC/udp"   >/dev/null
     log "UFW 已放行五协议端口"
+  elif have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+    local spec
+    for spec in "$PORT_VLESS/tcp" "$PORT_VMESS/tcp" "$PORT_ANYTLS/tcp" "$PORT_HY2/udp" "$PORT_TUIC/udp"; do
+      firewall-cmd --permanent --add-port="$spec" >/dev/null 2>&1 || true
+    done
+    firewall-cmd --reload >/dev/null 2>&1 || true
+    log "firewalld 已放行五协议端口"
   else
-    warn "UFW 未启用或不存在，未改防火墙；云厂商安全组/防火墙请手动放行："
+    warn "UFW/firewalld 均未启用，未改本机防火墙；云厂商安全组请手动放行："
     warn "  TCP $PORT_VLESS $PORT_VMESS $PORT_ANYTLS ；UDP $PORT_HY2 $PORT_TUIC"
   fi
 }
 
 do_install() {
   need_root install
+  preflight
   install_deps
   mkdir -p "$DIR" "$DIR/backup"
   resolve_ports install
@@ -473,6 +508,13 @@ close_firewall() {
     ufw delete allow "$PORT_ANYTLS/tcp" >/dev/null 2>&1 || true
     ufw delete allow "$PORT_HY2/udp"     >/dev/null 2>&1 || true
     ufw delete allow "$PORT_TUIC/udp"   >/dev/null 2>&1 || true
+  fi
+  if have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+    local spec
+    for spec in "$PORT_VLESS/tcp" "$PORT_VMESS/tcp" "$PORT_ANYTLS/tcp" "$PORT_HY2/udp" "$PORT_TUIC/udp"; do
+      firewall-cmd --permanent --remove-port="$spec" >/dev/null 2>&1 || true
+    done
+    firewall-cmd --reload >/dev/null 2>&1 || true
   fi
 }
 
