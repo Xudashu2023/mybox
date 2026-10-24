@@ -1,9 +1,7 @@
 # mybox —— 个人纯净版 sing-box 一键安装脚本
 
-由甬哥 sing-box-yg（sb.sh，4468 行）拆解后重写的个人版本，约 440 行。
 只做三件事：**装内核、写配置、起服务。**
 
-拆解过程与取舍见 [TEARDOWN.md](TEARDOWN.md)。
 
 ## 快速开始
 
@@ -25,15 +23,10 @@ sudo bash mybox-install.sh install
 
 子命令：`install` / `uninstall` / `print-config`（免 root 预览配置）/ `show-links`
 
-## 明确不做的事
-
-没有菜单、没有 Argo 隧道、没有 WARP、没有 GitLab 订阅托管、没有 TG 推送、
-没有聚合订阅全家桶、没有自更新、没有快捷命令、没有定时重启 cron。
-
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。可自由使用、修改与分发。
-本脚本与 sing-box 官方（SagerNet）及被拆解的原脚本作者无隶属关系；
+本脚本与 sing-box 官方（SagerNet）无隶属关系；
 在本机以 root 运行任何一键脚本前，请先通读脚本内容。
 
 ## 注意
@@ -60,3 +53,4 @@ mybox
 
 核心安装脚本本身依旧无菜单、无快捷命令；面板只是它的可选外壳，
 所有装/改/卸都转调安装脚本的子命令，配置与凭据只有一份。
+个人开发测试，仅为测试所有。
