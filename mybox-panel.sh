@@ -10,7 +10,7 @@
 # =============================================================================
 set -uo pipefail
 
-PANEL_VERSION="2.8"
+PANEL_VERSION="2.9"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -196,10 +196,15 @@ status_block() { # 卡片式状态区：状态卡 + 节点卡（开放式右边�
     warp_txt="直连（WARP 未启动）"
   fi
   local hy2mark vmpath="-"
-  if [ -f "$CONF" ] && grep -A6 '"hysteria2"' "$CONF" | grep -q '"h3"'; then
-    hy2mark="${BGRN}ALPN h3 ✓ 已修复${R}"
+  if [ -f "$CONF" ] && grep -A20 '"hysteria2"' "$CONF" | grep -q '"h3"'; then
+    hy2mark="${BGRN}ALPN h3 ✓${R}"
   else
-    hy2mark="${BRED}ALPN h3 ✗ 未修复${R}"
+    hy2mark="${BRED}ALPN h3 ✗${R}"
+  fi
+  if [ -f "$CONF" ] && grep -q '"salamander"' "$CONF"; then
+    hy2mark="$hy2mark ${BGRN}· 混淆 ✓${R}"
+  else
+    hy2mark="$hy2mark ${BRED}· 混淆 ✗${R}"
   fi
   [ -f "$CREDS" ] && vmpath="$(. "$CREDS" 2>/dev/null; echo "${VMESS_PATH:--}")"
   local mem_pct disk_pct
@@ -295,6 +300,8 @@ tests = {
           "congestion_control": "bbr",
           "tls": {"enabled": True, "server_name": e["CERT_CN"], "insecure": True, "alpn": ["h3"]}},
 }
+if creds.get("PASS_OBFS"):
+    tests["hy2"]["obfs"] = {"type": "salamander", "password": creds["PASS_OBFS"]}
 ports = {"vless": int(e["PORT_VLESS"]), "vmess": int(e["PORT_VMESS"]), "anytls": int(e["PORT_ANYTLS"]),
          "hy2": int(e["PORT_HY2"]), "tuic": int(e["PORT_TUIC"])}
 for name, ob in tests.items():

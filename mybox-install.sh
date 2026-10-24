@@ -189,6 +189,13 @@ load_or_create_creds() {
     # shellcheck disable=SC1090
     set -a; . "$CREDS"; set +a
     log "复用已有凭据（$CREDS）"
+    if [ -z "${PASS_OBFS:-}" ]; then
+      PASS_OBFS="$(openssl rand -base64 18 | tr -d '\n')"
+      printf "PASS_OBFS='%s'\n" "$PASS_OBFS" >> "$CREDS"
+      chmod 600 "$CREDS"
+      export PASS_OBFS
+      log "已补生成 Hysteria2 混淆密码（PASS_OBFS）并追加到凭据文件"
+    fi
     return 0
   fi
   UUID_VLESS="$(gen_uuid)"
@@ -196,6 +203,7 @@ load_or_create_creds() {
   UUID_TUIC="$(gen_uuid)"
   PASS_ANYTLS="$(openssl rand -base64 18 | tr -d '\n')"
   PASS_HY2="$(openssl rand -base64 18 | tr -d '\n')"
+  PASS_OBFS="$(openssl rand -base64 18 | tr -d '\n')"
   PASS_TUIC="$(openssl rand -base64 18 | tr -d '\n')"
   local kp priv pub
   kp="$("$BIN" generate reality-keypair)"
@@ -211,6 +219,7 @@ load_or_create_creds() {
     printf "UUID_TUIC='%s'\n"     "$UUID_TUIC"
     printf "PASS_ANYTLS='%s'\n"   "$PASS_ANYTLS"
     printf "PASS_HY2='%s'\n"      "$PASS_HY2"
+    printf "PASS_OBFS='%s'\n"     "$PASS_OBFS"
     printf "PASS_TUIC='%s'\n"     "$PASS_TUIC"
     printf "REALITY_PRIV='%s'\n"  "$REALITY_PRIV"
     printf "REALITY_PUB='%s'\n"   "$REALITY_PUB"
@@ -292,6 +301,7 @@ cfg = {
     {"type": "hysteria2", "tag": "hy2-in", "listen": "::",
      "listen_port": int(e("PORT_HY2")),
      "users": [{"password": e("PASS_HY2")}],
+     "obfs": {"type": "salamander", "password": e("PASS_OBFS")},
      "tls": {**tls, "alpn": ["h3"]}},
     {"type": "tuic", "tag": "tuic-in", "listen": "::",
      "listen_port": int(e("PORT_TUIC")),
@@ -323,7 +333,7 @@ write_client_files() {
   mkdir -p "$outdir"
   # 客户端生成靠环境变量传参，这里统一导出，避免 show-links 路径下端口为 None
   export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC REALITY_SNI CERT_CN
-  export UUID_VLESS UUID_VMESS UUID_TUIC PASS_ANYTLS PASS_HY2 PASS_TUIC
+  export UUID_VLESS UUID_VMESS UUID_TUIC PASS_ANYTLS PASS_HY2 PASS_TUIC PASS_OBFS
   export REALITY_PUB SHORT_ID VMESS_PATH
   SERVER_IP_OUT="$ip" python3 - "$outdir" <<'PY'
 import base64, json, os, sys
@@ -342,7 +352,8 @@ links = [
  f"&sid={e('SHORT_ID')}&type=tcp&headerType=none#mybox-vless",
  "vmess://" + base64.b64encode(json.dumps(vmess_obj).encode()).decode(),
  f"anytls://{q(e('PASS_ANYTLS'))}@{ip}:{e('PORT_ANYTLS')}/?insecure=1&sni={e('CERT_CN')}#mybox-anytls",
- f"hysteria2://{q(e('PASS_HY2'))}@{ip}:{e('PORT_HY2')}/?insecure=1&sni={e('CERT_CN')}#mybox-hy2",
+ f"hysteria2://{q(e('PASS_HY2'))}@{ip}:{e('PORT_HY2')}/?insecure=1&sni={e('CERT_CN')}"
+ f"&obfs=salamander&obfs-password={q(e('PASS_OBFS'))}#mybox-hy2",
  f"tuic://{e('UUID_TUIC')}:{q(e('PASS_TUIC'))}@{ip}:{e('PORT_TUIC')}"
  f"?congestion_control=bbr&alpn=h3&sni={e('CERT_CN')}&allow_insecure=1#mybox-tuic",
 ]
@@ -395,6 +406,8 @@ proxies:
     server: {ip}
     port: {e('PORT_HY2')}
     password: {yq(e('PASS_HY2'))}
+    obfs: salamander
+    obfs-password: {yq(e('PASS_OBFS'))}
     alpn: [h3]
     sni: {e('CERT_CN')}
     skip-cert-verify: true
@@ -558,6 +571,7 @@ do_print_config() {
   UUID_VMESS="22222222-2222-2222-2222-222222222222"
   UUID_TUIC="33333333-3333-3333-3333-333333333333"
   PASS_ANYTLS="preview-anytls-pass" PASS_HY2="preview-hy2-pass" PASS_TUIC="preview-tuic-pass"
+  PASS_OBFS="preview-obfs-pass"
   REALITY_PRIV="preview-reality-private-key" SHORT_ID="0123abcd" VMESS_PATH="/preview-vm"
   # 若本机已有 sing-box 二进制（可用 SB_BIN 指定），用真密钥生成预览，方便直接 sing-box check
   local cand
@@ -567,7 +581,7 @@ do_print_config() {
       break
     fi
   done
-  export UUID_VLESS UUID_VMESS UUID_TUIC PASS_ANYTLS PASS_HY2 PASS_TUIC REALITY_PRIV SHORT_ID VMESS_PATH
+  export UUID_VLESS UUID_VMESS UUID_TUIC PASS_ANYTLS PASS_HY2 PASS_TUIC PASS_OBFS REALITY_PRIV SHORT_ID VMESS_PATH
   export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC REALITY_SNI
   local tmp; tmp="$(mktemp)"
   CONF="$tmp" write_config >/dev/null

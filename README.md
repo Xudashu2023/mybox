@@ -15,6 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/Xudashu2023/mybox/main/install.sh -
 ## 功能
 
 - 五协议：VLESS-REALITY / VMess-WS / AnyTLS / Hysteria2 / TUIC
+- Hysteria2 自带 salamander 混淆（独立混淆密码，链接与 Clash 配置自动带 obfs 参数）
 - 端口：首次安装在 20000-60000 随机生成、互不重复且避开已占用端口，写入 `/etc/mybox/ports.env` 持久化；重装自动复用不变更。已有旧版 config.json 的机器保持原端口。可用环境变量 `PORT_*` 或面板指定
 - 每个协议独立生成 UUID/密码（不再共用一个凭据）
 - sing-box 内核锁定 1.14.3（不追 latest），下载后按 GitHub 官方发布摘要做 SHA256 校验，取不到摘要直接中止
