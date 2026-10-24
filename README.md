@@ -3,12 +3,12 @@
 只做三件事：**装内核、写配置、起服务。**
 
 
-## 快速开始
+## 一键安装（本体 + 面板）
 
 ```bash
-curl -fsSL -o mybox-install.sh https://raw.githubusercontent.com/Xudashu2023/mybox/main/mybox-install.sh
-sudo bash mybox-install.sh install
+curl -fsSL https://raw.githubusercontent.com/Xudashu2023/mybox/main/install.sh -o /tmp/mybox-all.sh && sudo bash /tmp/mybox-all.sh
 ```
+
 
 或克隆仓库后本地运行 `sudo bash mybox-install.sh install`。
 
@@ -24,11 +24,6 @@ sudo bash mybox-install.sh install
 
 子命令：`install` / `uninstall`（普通卸载）/ `purge`（完全卸载）/ `print-config`（免 root 预览配置）/ `show-links` / `status`
 
-## 一键安装（本体 + 面板）
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Xudashu2023/mybox/main/install.sh -o /tmp/mybox-all.sh && sudo bash /tmp/mybox-all.sh
-```
 
 一条命令装齐本体与面板，装完输 `mybox` 进面板。出站经 WARP/透明代理的机器需带上真实 IP（否则自动探测到的是代理出口）：`sudo SERVER_IP=x.x.x.x bash /tmp/mybox-all.sh`。
 
