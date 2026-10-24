@@ -10,7 +10,7 @@
 # =============================================================================
 set -uo pipefail
 
-PANEL_VERSION="2.5"
+PANEL_VERSION="2.6"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -439,13 +439,13 @@ EOF
     case "$c" in
       1) confirm "重跑 install？（凭据复用，服务会重启）" && run_script install ;;
       2)
-        if curl -fsSL "$RAW_BASE/mybox-install.sh" -o "$SCRIPT.new" && bash -n "$SCRIPT.new"; then
+        if curl -fsSL "$RAW_BASE/mybox-install.sh?t=$(date +%s)" -o "$SCRIPT.new" && bash -n "$SCRIPT.new"; then
           mv "$SCRIPT.new" "$SCRIPT"; ok "脚本已更新到最新版"
           confirm "现在重装？" && run_script install
         else err "下载或校验失败，未替换现有脚本"; rm -f "$SCRIPT.new"; fi
         ;;
       3)
-        if curl -fsSL "$RAW_BASE/mybox-panel.sh" -o "/tmp/mybox-panel.new" && bash -n /tmp/mybox-panel.new; then
+        if curl -fsSL "$RAW_BASE/mybox-panel.sh?t=$(date +%s)" -o "/tmp/mybox-panel.new" && bash -n /tmp/mybox-panel.new; then
           install -m 755 /tmp/mybox-panel.new "$PANEL_SELF"; rm -f /tmp/mybox-panel.new
           ok "面板已更新，重新运行 mybox 生效"
           exit 0
@@ -664,6 +664,28 @@ EOF
   done
 }
 
+panel_purge() { # 面板自带完全卸载：不依赖安装脚本版本，逐项清干净，最后删面板自身
+  run_script uninstall >/dev/null 2>&1 || true
+  systemctl disable --now mybox 2>/dev/null || true
+  rm -f /etc/systemd/system/mybox.service
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl reset-failed mybox 2>/dev/null || true
+  rm -f "$BIN" "$BIN.bak"
+  if command -v ufw >/dev/null 2>&1; then
+    local spec
+    for spec in "$PORT_VLESS/tcp" "$PORT_VMESS/tcp" "$PORT_ANYTLS/tcp" "$PORT_HY2/udp" "$PORT_TUIC/udp"; do
+      ufw delete allow "$spec" >/dev/null 2>&1 || true
+    done
+  fi
+  rm -rf "$DIR" /root/mybox-backups
+  rm -f "$SCRIPT" /root/mybox-install.sh /root/mybox-panel.sh
+  rm -f /etc/sysctl.d/99-mybox-bbr.conf /etc/modules-load.d/mybox-bbr.conf
+  sysctl -w net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1 || true
+  sysctl -w net.core.default_qdisc=fq_codel >/dev/null 2>&1 || true
+  rm -f "$PANEL_SELF"
+  hash -r 2>/dev/null || true
+}
+
 uninstall_box() {
   echo "卸载分两档："
   echo "  1. 普通卸载：删服务、配置、凭据与内核；保留面板和脚本，可随时重装"
@@ -679,8 +701,8 @@ uninstall_box() {
       warn "完全卸载不可恢复：节点、面板、脚本、备份、BBR 配置全部删除。"
       confirm "确定完全卸载？" || { echo "已取消"; return 0; }
       confirm "再确认一次：真的完全卸载？" || { echo "已取消"; return 0; }
-      run_script purge --yes
-      ok "完全卸载完成，面板命令已一并删除，本面板退出"
+      panel_purge
+      ok "完全卸载完成：服务、配置、凭据、内核、面板命令均已删除"
       exit 0 ;;
     *) echo "已取消" ;;
   esac
