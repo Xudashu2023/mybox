@@ -186,7 +186,8 @@ cfg = {
      "users": [{"password": e("PASS_ANYTLS")}], "tls": tls},
     {"type": "hysteria2", "tag": "hy2-in", "listen": "::",
      "listen_port": int(e("PORT_HY2")),
-     "users": [{"password": e("PASS_HY2")}], "tls": tls},
+     "users": [{"password": e("PASS_HY2")}],
+     "tls": {**tls, "alpn": ["h3"]}},
     {"type": "tuic", "tag": "tuic-in", "listen": "::",
      "listen_port": int(e("PORT_TUIC")),
      "users": [{"uuid": e("UUID_TUIC"), "password": e("PASS_TUIC")}],
@@ -285,6 +286,7 @@ proxies:
     server: {ip}
     port: {e('PORT_HY2')}
     password: {yq(e('PASS_HY2'))}
+    alpn: [h3]
     sni: {e('CERT_CN')}
     skip-cert-verify: true
   - name: mybox-tuic
