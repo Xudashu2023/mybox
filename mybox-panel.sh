@@ -10,7 +10,7 @@
 # =============================================================================
 set -uo pipefail
 
-PANEL_VERSION="2.2"
+PANEL_VERSION="2.3"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -101,43 +101,125 @@ detect_ip() {
 listening() { ss -tuln 2>/dev/null | grep -q ":$1\\b"; }
 svc_active() { [ "$(systemctl is-active "$SERVICE" 2>/dev/null)" = "active" ]; }
 
-# ---------- 仪表盘 ----------
-dashboard() {
-  local ip host os ver active ad
-  ip="$(detect_ip)"; host="$(hostname 2>/dev/null || echo -)"
-  os="$(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")"
-  ver="$("$BIN" version 2>/dev/null | awk '/version/{print $NF; exit}')"
-  svc_active && active=1 || active=0
-  if [ -f "$CONF" ] && grep -A6 '"hysteria2"' "$CONF" | grep -q '"h3"'; then ad=1; else ad=0; fi
+# ---------- 界面（仿甬哥 sb 面板：块字主标 / 绿菜单 / 状态区） ----------
+SEP="$R"   # 分隔线颜色在 COLOR 启用时覆盖
+[ "$COLOR" = "1" ] && SEP=$'\033[38;5;203m'
+wave() { printf "%s~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~%s\n" "$SEP" "$R"; }
+dash() { printf "%s--------------------------------------------------------------%s\n" "$SEP" "$R"; }
 
-  printf "\n%s┌──────────────────────────────────────────────────────────┐%s\n" "$BCYN" "$R"
-  printf "%s│%s  %s✦ mybox 面板 v%s%s          %s个人 sing-box 节点管理%s   %s│%s\n" \
-    "$BCYN" "$R" "$BMAG" "$PANEL_VERSION" "$R" "$D" "$R" "$BCYN" "$R"
-  printf "%s└──────────────────────────────────────────────────────────┘%s\n" "$BCYN" "$R"
-  printf " %s主机%s %s   %s系统%s %s\n" "$D" "$R" "$host" "$D" "$R" "$os"
-  printf " %s地址%s %s%s%s   %s内核%s sing-box %s   %s服务%s " \
-    "$D" "$R" "$B" "$ip" "$R" "$D" "$R" "${ver:-未知}" "$D" "$R"
-  if [ "$active" = "1" ]; then printf "%s运行中%s\n" "$BGRN" "$R"; else printf "%s未运行%s\n" "$BRED" "$R"; fi
-  hr
-  local row="" p name proto
-  for spec in "VLESS $PORT_VLESS tcp" "VMess $PORT_VMESS tcp" "AnyTLS $PORT_ANYTLS tcp" "Hy2 $PORT_HY2 udp" "TUIC $PORT_TUIC udp"; do
-    set -- $spec; name="$1"; p="$2"; proto="$3"
-    listening "$p" && st=1 || st=0
-    row="${row}  $(dot "$st") ${name} ${D}${p}/${proto}${R}"
+banner_art() { # MY BOX 块字主标，每字一色（用 ASCII 占位符，不依赖 locale）
+  local M_=("#   #" "## ##" "# # #" "#   #" "#   #")
+  local Y_=("#   #" " # # " "  #  " "  #  " "  #  ")
+  local B_=("#### " "#   #" "#### " "#   #" "#### ")
+  local O_=(" ### " "#   #" "#   #" "#   #" " ### ")
+  local X_=("#   #" " # # " "  #  " " # # " "#   #")
+  local cols=() r row ch i
+  if [ "$COLOR" = "1" ]; then
+    cols=($'\033[1;34m' $'\033[1;36m' $'\033[1;35m' $'\033[1;97m' $'\033[1;31m')
+  else
+    cols=("" "" "" "" "")
+  fi
+  for r in 0 1 2 3 4; do
+    row=" "
+    local parts=("${M_[$r]}" "${Y_[$r]}" "${B_[$r]}" "${O_[$r]}" "${X_[$r]}")
+    for i in 0 1 2 3 4; do
+      row+="${cols[$i]}"
+      local s="${parts[$i]}"
+      while [ -n "$s" ]; do
+        ch="${s:0:1}"; s="${s:1}"
+        if [ "$ch" = "#" ]; then row+="██"; else row+="  "; fi
+      done
+      row+="$R  "
+    done
+    printf "%s\n" "$row"
   done
-  printf "%s\n" "$row"
-  local bbr_on=0 warp_on=0
-  [ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" = "bbr" ] && bbr_on=1
-  ss -tuln 2>/dev/null | grep -q ':40000' && warp_on=1
-  printf "  %s Hy2 h3 修复   %s BBR+FQ 加速   %s WARP 出口\n" \
-    "$(dot "$ad")" "$(dot "$bbr_on")" "$(dot "$warp_on")"
-  # 资源条
+}
+
+project_lines() {
+  printf "%smybox Github项目%s ： github.com/Xudashu2023/mybox\n" "$B" "$R"
+  printf "%s五协议共存脚本%s   ： Vless-reality-vision、Vmess-ws、Hy2、Tuic、Anytls\n" "$B" "$R"
+  printf "%s脚本快捷方式%s     ： mybox\n" "$B" "$R"
+}
+
+region_of_ip() { # 地区查询（结果按 IP 缓存 7 天，失败显示未知）
+  local ip="$1" cache="$DIR/.region" cip="" cdate=0 now
+  now="$(date +%s)"
+  if [ -f "$cache" ]; then
+    cip="$(sed -n '1p' "$cache")"; cdate="$(sed -n '2p' "$cache")"
+    if [ "$cip" = "$ip" ] && [ $((now - ${cdate:-0})) -lt 604800 ]; then
+      sed -n '3p' "$cache"; return 0
+    fi
+  fi
+  local out
+  out="$(curl -s --max-time 3 "http://ip-api.com/json/${ip}?lang=zh-CN&fields=status,country,regionName,city,isp" 2>/dev/null \
+    | python3 -c '
+import json,sys
+try:
+  d=json.load(sys.stdin)
+  if d.get("status")=="success":
+    print(" ".join(x for x in [d.get("country",""), d.get("regionName",""), d.get("city",""), d.get("isp","")] if x))
+except Exception: pass' 2>/dev/null)"
+  [ -z "$out" ] && out="未知"
+  { printf "%s\n%s\n%s\n" "$ip" "$now" "$out" > "$cache"; } 2>/dev/null || true
+  echo "$out"
+}
+
+core_latest() { # 最新正式版内核（每次面板会话只查一次）
+  if [ -z "${CORE_LATEST_CACHE:-}" ]; then
+    CORE_LATEST_CACHE="$(curl -fsSL --max-time 3 https://api.github.com/repos/SagerNet/sing-box/releases/latest 2>/dev/null \
+      | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("tag_name","").lstrip("v"))
+except Exception: pass' 2>/dev/null)"
+    [ -z "$CORE_LATEST_CACHE" ] && CORE_LATEST_CACHE="未知"
+  fi
+  echo "$CORE_LATEST_CACHE"
+}
+
+status_block() { # 仿 sb：版本行 + VPS 状态 + 节点关键信息
+  local cur latest ip ipv6 os virt cc
+  cur="$("$BIN" version 2>/dev/null | awk '/version/{print $NF; exit}')"; [ -z "$cur" ] && cur="未安装"
+  latest="$(core_latest)"
+  ip="$(detect_ip)"
+  ipv6="$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/{split($2,a,"/"); print a[1]; exit}')"; [ -z "$ipv6" ] && ipv6="无 IPv6"
+  os="$(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-Linux}")"
+  virt="$(systemd-detect-virt 2>/dev/null || echo 未知)"
+  cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo 未知)"
+
+  printf "当前 mybox 面板版本：%s%s%s（已安装）\n" "$BCYN" "$PANEL_VERSION" "$R"
+  printf "当前 Sing-box 面板锁定内核：%s%s%s\n" "$BCYN" "$SB_VERSION" "$R"
+  printf "当前 Sing-box 已安装正式版内核：%s%s%s\n" "$BCYN" "$cur" "$R"
+  if [ "$latest" != "未知" ] && [ "$latest" != "$cur" ]; then
+    printf "检测到最新 Sing-box 正式版内核：%s%s%s（可选 12 → 4 进行更新）\n" "$BYEL" "$latest" "$R"
+  fi
+  wave
+  printf "%sVPS状态如下：%s\n" "$B" "$R"
+  printf "系统：%s%s%s  内核：%s  处理器：%s  虚拟化：%s  BBR算法：%s%s%s\n" \
+    "$BCYN" "$os" "$R" "$(uname -r)" "$(uname -m)" "$virt" "$BYEL" "$cc" "$R"
+  printf "本地IPV4地址：%s%s%s  本地IPV6地址：%s\n" "$BYEL" "$ip" "$R" "$ipv6"
+  printf "服务器地区：%s\n" "$(region_of_ip "$ip")"
+  printf "Sing-box状态：%s\n" "$(svc_active && echo "${BGRN}运行中${R}" || echo "${BRED}未运行${R}")"
+  wave
+  printf "%sSing-box节点关键信息如下：%s\n" "$B" "$R"
+  local hy2fix="未修复（缺 alpn h3）" hy2col="$BRED"
+  if [ -f "$CONF" ] && grep -A6 '"hysteria2"' "$CONF" | grep -q '"h3"'; then hy2fix="已修复（alpn h3）"; hy2col="$BGRN"; fi
+  local vmpath="-"; [ -f "$CREDS" ] && vmpath="$(. "$CREDS" 2>/dev/null; echo "${VMESS_PATH:--}")"
+  printf "🚀 %sVless-reality 】%s端口：%s%s%s  Reality域名伪装地址：%s\n" "$B" "$R" "$BYEL" "$PORT_VLESS" "$R" "$REALITY_SNI"
+  printf "🚀 %sVmess-ws      】%s端口：%s%s%s  证书形式：TLS关闭  路径：%s\n" "$B" "$R" "$BYEL" "$PORT_VMESS" "$R" "$vmpath"
+  printf "🚀 %sHysteria-2    】%s端口：%s%s%s  证书形式：自签证书  握手修复：%s%s%s\n" "$B" "$R" "$BYEL" "$PORT_HY2" "$R" "$hy2col" "$hy2fix" "$R"
+  printf "🚀 %sTuic-v5       】%s端口：%s%s%s  证书形式：自签证书  拥塞控制：bbr\n" "$B" "$R" "$BYEL" "$PORT_TUIC" "$R"
+  printf "🚀 %sAnytls        】%s端口：%s%s%s  证书形式：自签证书\n" "$B" "$R" "$BYEL" "$PORT_ANYTLS" "$R"
+  wave
+  if ss -tuln 2>/dev/null | grep -q ':40000'; then
+    printf "WARP-plus-Socks5状态：%s已启动（127.0.0.1:40000）%s\n" "$BGRN" "$R"
+  else
+    printf "WARP-plus-Socks5状态：%s未启动%s\n" "$BYEL" "$R"
+  fi
   local mem_pct disk_pct
   mem_pct="$(free 2>/dev/null | awk '/^Mem:/{printf "%d", $3*100/$2}')"
   disk_pct="$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"
-  [ -n "${mem_pct:-}" ]  && printf "  %s内存%s %s\n" "$D" "$R" "$(bar "$mem_pct")"
-  [ -n "${disk_pct:-}" ] && printf "  %s磁盘%s %s\n" "$D" "$R" "$(bar "$disk_pct")"
-  hr
+  [ -n "${mem_pct:-}" ]  && printf "内存占用：%s\n" "$(bar "$mem_pct")"
+  [ -n "${disk_pct:-}" ] && printf "磁盘占用：%s\n" "$(bar "$disk_pct")"
+  dash
 }
 
 # ---------- 节点与配置 ----------
@@ -588,47 +670,54 @@ uninstall_box() {
 }
 
 # ---------- 主菜单 ----------
+menu_list() {
+  local G="$GRN" GB="$BGRN"
+  printf "%s 1. 查看节点链接%s\n" "$GB" "$R"
+  printf "%s 2. 二维码导入 [手机扫码导入节点]%s\n" "$G" "$R"
+  printf "%s 3. 查看 Clash 配置%s\n" "$G" "$R"
+  printf "%s 4. 全协议自测 [逐个回连测通断/出口/延迟]%s\n" "$G" "$R"
+  dash
+  printf "%s 5. 服务管理 [启动/停止/重启 Sing-box]%s\n" "$G" "$R"
+  printf "%s 6. 查看 Sing-box 运行日志%s\n" "$G" "$R"
+  printf "%s 7. 查看流量统计%s\n" "$G" "$R"
+  printf "%s 8. 查看系统信息%s\n" "$G" "$R"
+  printf "%s 9. 出口测试 [直连/WARP 出口 IP]%s\n" "$G" "$R"
+  printf "%s10. 一键原版 BBR+FQ 加速%s\n" "$G" "$R"
+  dash
+  printf "%s11. 修改设置 [IP优先/端口/SNI/证书域名]%s\n" "$G" "$R"
+  printf "%s12. 更新中心 [脚本/面板/更新切换指定内核版本]%s\n" "$G" "$R"
+  printf "%s13. 备份/恢复 [配置与凭据打包]%s\n" "$G" "$R"
+  printf "%s14. 卸载 Sing-box（mybox）%s\n" "$G" "$R"
+  dash
+  printf "%s 0. 退出脚本%s\n" "$G" "$R"
+}
+
 while true; do
-  dashboard
-  cat <<EOF
- ${BCYN}▸ 节点${R}
-   ${B} 1${R}  查看节点链接
-   ${B} 2${R}  二维码导入 ${D}（手机扫码）${R}
-   ${B} 3${R}  Clash 配置
-   ${B} 4${R}  全协议自测 ${D}（逐个回连测通断/延迟）${R}
- ${BCYN}▸ 运维${R}
-   ${B} 5${R}  服务管理 ${D}（启动 / 停止 / 重启）${R}
-   ${B} 6${R}  日志查看
-   ${B} 7${R}  流量统计
-   ${B} 8${R}  系统信息
-   ${B} 9${R}  出口测试
-   ${B}10${R}  BBR 加速 ${D}（原版 BBR + FQ 一键开关）${R}
- ${BCYN}▸ 设置${R}
-   ${B}11${R}  修改设置 ${D}（IP / 端口 / SNI）${R}
-   ${B}12${R}  更新中心 ${D}（脚本 / 面板 / 内核版本）${R}
-   ${B}13${R}  备份 / 恢复
-   ${B}14${R}  卸载 mybox
-   ${B} 0${R}  退出
-EOF
-  hr
-  printf "%s请选择 [0-14]:%s " "$B" "$R"
-  read -r choice || exit 0
-  case "$choice" in
-    1)  show_links;    pause ;;
-    2)  show_qr;       pause ;;
-    3)  show_clash;    pause ;;
-    4)  self_test ;;
-    5)  service_menu ;;
-    6)  log_menu ;;
-    7)  show_traffic;  pause ;;
-    8)  show_sysinfo;  pause ;;
-    9)  test_egress;   pause ;;
-    10) bbr_menu ;;
-    11) edit_settings; pause ;;
-    12) update_menu ;;
-    13) backup_menu ;;
-    14) uninstall_box; pause ;;
-    0)  printf "%s再见 👋%s\n" "$D" "$R"; exit 0 ;;
-    *)  err "无效选择" ;;
-  esac
+banner_art
+wave
+project_lines
+wave
+menu_list
+wave
+status_block
+printf "%s请输入数字 [0-14]：%s " "$BYEL" "$R"
+read -r choice || exit 0
+case "$choice" in
+1) show_links; pause;;
+2) show_qr; pause;;
+3) show_clash; pause;;
+4) self_test;;
+5) service_menu;;
+6) log_menu;;
+7) show_traffic; pause;;
+8) show_sysinfo; pause;;
+9) test_egress; pause;;
+10) bbr_menu;;
+11) edit_settings; pause;;
+12) update_menu;;
+13) backup_menu;;
+14) uninstall_box; pause;;
+0) printf "%s再见 👋%s\n" "$D" "$R"; exit 0;;
+*) err "无效选择";;
+esac
 done
