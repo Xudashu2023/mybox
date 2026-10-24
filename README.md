@@ -41,3 +41,19 @@ MIT，见 [LICENSE](LICENSE)。可自由使用、修改与分发。
 - 自签证书 CN 默认 www.bing.com、REALITY SNI 默认 apple.com，均可用环境变量改
 - 防火墙只处理 UFW（启用时放行五协议端口）；云厂商安全组需自行放行
 - 服务端配置按 sing-box 1.14 格式生成（1.14 已移除 VMess 服务端 alter_id 字段）
+
+## 面板（可选附加件）
+
+`mybox-panel.sh` 是独立的交互面板，装上后在服务器输 `mybox` 调出：
+彩色仪表盘（服务状态、五端口监听点、内存/磁盘条、Hy2 握手修复标记），
+菜单含查看链接、终端二维码导入、全协议本机自测、服务管理、日志、
+流量统计、系统信息、修改 IP/端口/SNI、从 GitHub 更新、备份/恢复、卸载。
+
+```bash
+curl -fsSL -o /usr/local/bin/mybox https://raw.githubusercontent.com/Xudashu2023/mybox/main/mybox-panel.sh
+chmod 755 /usr/local/bin/mybox
+mybox
+```
+
+核心安装脚本本身依旧无菜单、无快捷命令；面板只是它的可选外壳，
+所有装/改/卸都转调安装脚本的子命令，配置与凭据只有一份。
