@@ -24,6 +24,14 @@ sudo bash mybox-install.sh install
 
 子命令：`install` / `uninstall`（普通卸载）/ `purge`（完全卸载）/ `print-config`（免 root 预览配置）/ `show-links` / `status`
 
+## 一键安装（本体 + 面板）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Xudashu2023/mybox/main/install.sh -o /tmp/mybox-all.sh && sudo bash /tmp/mybox-all.sh
+```
+
+一条命令装齐本体与面板，装完输 `mybox` 进面板。出站经 WARP/透明代理的机器需带上真实 IP（否则自动探测到的是代理出口）：`sudo SERVER_IP=x.x.x.x bash /tmp/mybox-all.sh`。
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。可自由使用、修改与分发。
@@ -44,7 +52,7 @@ MIT，见 [LICENSE](LICENSE)。可自由使用、修改与分发。
 菜单含查看链接、终端二维码导入、全协议本机自测、服务管理、日志、
 流量统计、系统信息、修改 IP/端口/SNI、一键开启内核原版 BBR+FQ 加速、
 Sing-box 内核版本管理（更新到最新 / 指定版本切换 / 官方版本摘要校验 / 失败自动回滚）、
-从 GitHub 更新脚本与面板、备份/恢复、两档卸载（普通卸载 / 完全卸载 purge：连面板、脚本、备份、BBR 配置一并清除）。
+节点测速（逐协议本机回连下载 15MB 测速）、从 GitHub 更新脚本与面板、备份/恢复、两档卸载（普通卸载 / 完全卸载 purge：连面板、脚本、备份、BBR 配置一并清除）。
 
 ```bash
 curl -fsSL -o /usr/local/bin/mybox https://raw.githubusercontent.com/Xudashu2023/mybox/main/mybox-panel.sh

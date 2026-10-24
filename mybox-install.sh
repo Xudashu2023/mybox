@@ -283,7 +283,11 @@ PY
 
 detect_ip() {
   if [ -n "${SERVER_IP:-}" ]; then echo "$SERVER_IP"; return 0; fi
-  curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || true
+  local ip=""
+  ip="$(curl -fsS --max-time 6 https://api.ipify.org 2>/dev/null || true)"
+  [ -z "$ip" ] && ip="$(curl -fsS --max-time 6 https://ifconfig.me/ip 2>/dev/null || true)"
+  [ -z "$ip" ] && ip="$(curl -fsS --max-time 6 https://ip.sb 2>/dev/null || true)"
+  printf '%s' "$ip" | tr -d '[:space:]'
 }
 
 # ---------- 客户端产物：链接 + 一份 Clash 配置，只写到本机目录 ----------

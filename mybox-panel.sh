@@ -10,7 +10,7 @@
 # =============================================================================
 set -uo pipefail
 
-PANEL_VERSION="2.6"
+PANEL_VERSION="2.7"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -98,7 +98,12 @@ run_script() { # 以当前面板设置调用安装脚本
 
 detect_ip() {
   if [ -n "$SERVER_IP" ]; then echo "$SERVER_IP"; return 0; fi
-  curl -fsS --max-time 8 https://api.ipify.org 2>/dev/null || echo "(未设置)"
+  local ip=""
+  ip="$(curl -fsS --max-time 6 https://api.ipify.org 2>/dev/null || true)"
+  [ -z "$ip" ] && ip="$(curl -fsS --max-time 6 https://ifconfig.me/ip 2>/dev/null || true)"
+  [ -z "$ip" ] && ip="$(curl -fsS --max-time 6 https://ip.sb 2>/dev/null || true)"
+  ip="$(printf '%s' "$ip" | tr -d '[:space:]')"
+  [ -n "$ip" ] && echo "$ip" || echo "(未设置)"
 }
 listening() { ss -tuln 2>/dev/null | grep -q ":$1\\b"; }
 svc_active() { [ "$(systemctl is-active "$SERVICE" 2>/dev/null)" = "active" ]; }
@@ -206,7 +211,7 @@ status_block() { # 卡片式状态区：状态卡 + 节点卡（开放式右边�
   printf "%s│%s  服务状态  %s\n" "$dgray" "$R" "$svc_txt"
   printf "%s│%s  核心版本  %ssing-box %s%s" "$dgray" "$R" "$white" "$cur" "$R"
   if [ "$latest" != "未知" ] && [ "$latest" != "$cur" ]; then
-    printf "  %s新版 %s 可用（12 → 4 更新）%s" "$gold" "$latest" "$R"
+    printf "  %s新版 %s 可用（13 → 4 更新）%s" "$gold" "$latest" "$R"
   fi
   echo
   printf "%s│%s  系统环境  %s%s · %s · %s%s\n" "$dgray" "$R" "$gray" "$os" "$(uname -m)" "$(systemd-detect-virt 2>/dev/null || echo 未知)" "$R"
@@ -255,12 +260,9 @@ show_clash() {
 }
 
 # ---------- 全协议本机自测 ----------
-self_test() {
-  [ -x "$BIN" ] || { err "找不到 sing-box 二进制 $BIN"; return 0; }
-  [ -f "$CREDS" ] || { err "找不到凭据文件 $CREDS"; return 0; }
-  svc_active || { err "mybox 服务未运行，先启动服务（菜单 5）。"; return 0; }
-  echo "将逐个协议在本机回连测试（经节点访问 ipify，看出口与延迟）…"
-  local tmp; tmp="$(mktemp -d)"
+# ---------- 测试配置生成（自测 / 测速共用） ----------
+gen_test_configs() { # $1=目标目录：按凭据生成五份本机回连客户端配置（mixed 18101）
+  local tmp="$1"
   # 生成五份客户端配置（python3 是 mybox 的既有依赖）
   CREDS="$CREDS" TESTDIR="$tmp" \
   PORT_VLESS="$PORT_VLESS" PORT_VMESS="$PORT_VMESS" PORT_ANYTLS="$PORT_ANYTLS" \
@@ -300,7 +302,18 @@ for name, ob in tests.items():
         json.dump(cfg(ob, ports[name]), f)
 print("generated")
 PY
-  [ $? -ne 0 ] && { err "生成测试配置失败"; rm -rf "$tmp"; return 0; }
+  local rc=$?
+  [ $rc -ne 0 ] && return 1
+  return 0
+}
+
+self_test() {
+  [ -x "$BIN" ] || { err "找不到 sing-box 二进制 $BIN"; return 0; }
+  [ -f "$CREDS" ] || { err "找不到凭据文件 $CREDS"; return 0; }
+  svc_active || { err "mybox 服务未运行，先启动服务（菜单 6）。"; return 0; }
+  echo "将逐个协议在本机回连测试（经节点访问 ipify，看出口与延迟）…"
+  local tmp; tmp="$(mktemp -d)"
+  gen_test_configs "$tmp" || { err "生成测试配置失败"; rm -rf "$tmp"; return 0; }
   printf "\n  %-8s %-10s %-18s %s\n" "协议" "结果" "出口 IP" "延迟"
   hr
   local name label
@@ -327,6 +340,51 @@ PY
   rm -rf "$tmp"
   echo
   echo "${D}注：本机回连只验证服务端配置与出站；你客户端不通多半是握手/网络问题，对照仪表盘上的 Hy2 h3 修复标记看。${R}"
+}
+
+speed_test() { # 逐协议测速：本机回连 + Cloudflare 15MB 下载测速
+  [ -x "$BIN" ] || { err "找不到 sing-box 二进制 $BIN"; return 0; }
+  [ -f "$CREDS" ] || { err "找不到凭据文件 $CREDS"; return 0; }
+  svc_active || { err "mybox 服务未运行，先启动服务（菜单 6）。"; return 0; }
+  echo "将逐个协议测速（本机回连，经节点下载 15MB 测速文件，每个协议最长约 25 秒）…"
+  local tmp; tmp="$(mktemp -d)"
+  gen_test_configs "$tmp" || { err "生成测试配置失败"; rm -rf "$tmp"; return 0; }
+  printf "\n  %-8s %-8s %-10s %-12s %s\n" "协议" "结果" "延迟" "下载速度" "实下流量"
+  hr
+  local name label
+  for name in vless vmess anytls hy2 tuic; do
+    case "$name" in
+      vless) label="VLESS";; vmess) label="VMess";; anytls) label="AnyTLS";;
+      hy2) label="Hy2";; tuic) label="TUIC";;
+    esac
+    "$BIN" run -c "$tmp/$name.json" >/dev/null 2>&1 &
+    local pid=$! i
+    for i in $(seq 1 30); do ss -tln 2>/dev/null | grep -q ':18101\b' && break; sleep 0.2; done
+    local t0 t1 ms out res spd size mbps mb
+    t0=$(date +%s%N)
+    out="$(curl -s --max-time 10 -x socks5h://127.0.0.1:18101 https://api.ipify.org 2>/dev/null)"
+    t1=$(date +%s%N); ms=$(( (t1 - t0) / 1000000 ))
+    if [ -z "$out" ]; then
+      printf "  %-8s %s✗ 不通%s\n" "$label" "$BRED" "$R"
+      kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; sleep 0.3; continue
+    fi
+    res="$(curl -s --max-time 25 -x socks5h://127.0.0.1:18101 -o /dev/null -w '%{speed_download} %{size_download}' 'https://speed.cloudflare.com/__down?bytes=15000000' 2>/dev/null)"
+    spd="${res%% *}"; size="${res##* }"
+    if [ -z "$res" ] || [ "$size" = "0" ] || [ "$size" = "$spd" ]; then
+      res="$(curl -s --max-time 25 -x socks5h://127.0.0.1:18101 -o /dev/null -w '%{speed_download} %{size_download}' 'https://cachefly.cachefly.net/10mb.test' 2>/dev/null)"
+      spd="${res%% *}"; size="${res##* }"
+    fi
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    case "$spd" in *[!0-9.]*|"") spd=0 ;; esac
+    case "$size" in *[!0-9]*|"") size=0 ;; esac
+    mbps="$(awk -v s="$spd" 'BEGIN{printf "%.1f", s/1048576}')"
+    mb="$(awk -v s="$size" 'BEGIN{printf "%.1f", s/1048576}')"
+    printf "  %-8s %s✓ 通%s   %-10s %-12s %s MB\n" "$label" "$BGRN" "$R" "$ms ms" "$mbps MB/s" "$mb"
+    sleep 0.3
+  done
+  rm -rf "$tmp"
+  echo
+  echo "${D}注：本机回连测速测的是服务器经节点的出站速度（服务器自身带宽）；你在客户端的实测还会受本地网络与线路影响。${R}"
 }
 
 # ---------- 服务与日志 ----------
@@ -720,20 +778,21 @@ menu_list() {
   printf "   %s02%s  %s扫码导入%s      %s终端二维码，手机扫码导入%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   printf "   %s03%s  %sClash 配置%s    %s查看 / 导出订阅配置%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   printf "   %s04%s  %s全协议自测%s    %s逐个回连，测通断 / 出口 / 延迟%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s05%s  %s节点测速%s      %s逐个回连下载测速（15MB）%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   echo
   printf "  %s运 维  ·  OPS%s\n" "$gray" "$R"
-  printf "   %s05%s  %s服务管理%s      %s启动 / 停止 / 重启 Sing-box%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
-  printf "   %s06%s  %s运行日志%s      %s实时 / 最近 100 行 / 错误筛选%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
-  printf "   %s07%s  %s流量统计%s      %svnstat 按日 / 按月%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
-  printf "   %s08%s  %s系统信息%s      %s系统 / 资源 / 监听端口总览%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
-  printf "   %s09%s  %s出口测试%s      %s直连与 WARP 出口 IP%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
-  printf "   %s10%s  %sBBR 加速%s      %s一键开启原版 BBR + FQ%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s06%s  %s服务管理%s      %s启动 / 停止 / 重启 Sing-box%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s07%s  %s运行日志%s      %s实时 / 最近 100 行 / 错误筛选%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s08%s  %s流量统计%s      %svnstat 按日 / 按月%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s09%s  %s系统信息%s      %s系统 / 资源 / 监听端口总览%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s10%s  %s出口测试%s      %s直连与 WARP 出口 IP%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s11%s  %sBBR 加速%s      %s一键开启原版 BBR + FQ%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   echo
   printf "  %s设 置  ·  SETTINGS%s\n" "$gray" "$R"
-  printf "   %s11%s  %s参数设置%s      %sIP 优先 / 端口 / SNI / 证书域名%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
-  printf "   %s12%s  %s更新中心%s      %s脚本 / 面板 / 内核版本管理%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
-  printf "   %s13%s  %s备份恢复%s      %s配置与凭据打包 / 恢复%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
-  printf "   %s14%s  %s卸载节点%s      %s卸载 mybox Sing-box%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s12%s  %s参数设置%s      %sIP 优先 / 端口 / SNI / 证书域名%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s13%s  %s更新中心%s      %s脚本 / 面板 / 内核版本管理%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s14%s  %s备份恢复%s      %s配置与凭据打包 / 恢复%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s15%s  %s卸载节点%s      %s普通卸载 / 完全卸载%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   echo
   printf "   %s00%s  %s退出%s\n" "$n" "$R" "$t" "$R"
 }
@@ -748,7 +807,7 @@ while true; do
   if [ "$COLOR" = "1" ]; then local_dgray=$'\033[38;5;240m'; local_gold=$'\033[38;5;214m'; fi
   printf "%s──────────────────────────────────────────────────────────────%s\n" "$local_dgray" "$R"
   printf "  %smybox panel v%s · github.com/Xudashu2023/mybox%s\n" "$local_dgray" "$PANEL_VERSION" "$R"
-  printf "  %s›%s 请输入编号 [0-14]：" "$local_gold" "$R"
+  printf "  %s›%s 请输入编号 [0-15]：" "$local_gold" "$R"
   read -r choice || exit 0
   if [[ "$choice" =~ ^[0-9]+$ ]]; then choice=$((10#$choice)); fi
   case "$choice" in
@@ -756,16 +815,17 @@ while true; do
     2)  show_qr;       pause ;;
     3)  show_clash;    pause ;;
     4)  self_test ;;
-    5)  service_menu ;;
-    6)  log_menu ;;
-    7)  show_traffic;  pause ;;
-    8)  show_sysinfo;  pause ;;
-    9)  test_egress;   pause ;;
-    10) bbr_menu ;;
-    11) edit_settings; pause ;;
-    12) update_menu ;;
-    13) backup_menu ;;
-    14) uninstall_box; pause ;;
+    5)  speed_test ;;
+    6)  service_menu ;;
+    7)  log_menu ;;
+    8)  show_traffic;  pause ;;
+    9)  show_sysinfo;  pause ;;
+    10) test_egress;   pause ;;
+    11) bbr_menu ;;
+    12) edit_settings; pause ;;
+    13) update_menu ;;
+    14) backup_menu ;;
+    15) uninstall_box; pause ;;
     0)  printf "%s再见 👋%s\n" "$D" "$R"; exit 0 ;;
     *)  err "无效选择" ;;
   esac
