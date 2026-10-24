@@ -47,7 +47,9 @@ MIT，见 [LICENSE](LICENSE)。可自由使用、修改与分发。
 `mybox-panel.sh` 是独立的交互面板，装上后在服务器输 `mybox` 调出：
 彩色仪表盘（服务状态、五端口监听点、内存/磁盘条、Hy2 握手修复标记），
 菜单含查看链接、终端二维码导入、全协议本机自测、服务管理、日志、
-流量统计、系统信息、修改 IP/端口/SNI、从 GitHub 更新、备份/恢复、卸载。
+流量统计、系统信息、修改 IP/端口/SNI、一键开启内核原版 BBR+FQ 加速、
+Sing-box 内核版本管理（更新到最新 / 指定版本切换 / 官方版本摘要校验 / 失败自动回滚）、
+从 GitHub 更新脚本与面板、备份/恢复、卸载。
 
 ```bash
 curl -fsSL -o /usr/local/bin/mybox https://raw.githubusercontent.com/Xudashu2023/mybox/main/mybox-panel.sh

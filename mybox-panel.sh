@@ -10,7 +10,7 @@
 # =============================================================================
 set -uo pipefail
 
-PANEL_VERSION="2.1"
+PANEL_VERSION="2.2"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -68,6 +68,7 @@ hr() { printf "%s─────────────────────
 SERVER_IP=""
 PORT_VLESS=40136; PORT_VMESS=2082; PORT_ANYTLS=20917; PORT_HY2=41413; PORT_TUIC=59899
 REALITY_SNI="apple.com"; CERT_CN="www.bing.com"
+SB_VERSION="1.14.3"
 [ -f "$PANEL_CONF" ] && . "$PANEL_CONF"
 
 save_panel_conf() {
@@ -81,11 +82,12 @@ save_panel_conf() {
     printf "PORT_TUIC='%s'\n"    "$PORT_TUIC"
     printf "REALITY_SNI='%s'\n"  "$REALITY_SNI"
     printf "CERT_CN='%s'\n"      "$CERT_CN"
+    printf "SB_VERSION='%s'\n"   "$SB_VERSION"
   } > "$PANEL_CONF"
 }
 
 run_script() { # 以当前面板设置调用安装脚本
-  SERVER_IP="$SERVER_IP" \
+  SERVER_IP="$SERVER_IP" SB_VERSION="$SB_VERSION" \
   PORT_VLESS="$PORT_VLESS" PORT_VMESS="$PORT_VMESS" PORT_ANYTLS="$PORT_ANYTLS" \
   PORT_HY2="$PORT_HY2" PORT_TUIC="$PORT_TUIC" \
   REALITY_SNI="$REALITY_SNI" CERT_CN="$CERT_CN" \
@@ -124,8 +126,11 @@ dashboard() {
     row="${row}  $(dot "$st") ${name} ${D}${p}/${proto}${R}"
   done
   printf "%s\n" "$row"
-  printf "  %s Hy2 握手修复 (alpn h3)%s   WARP 出口 %s\n" \
-    "$(dot "$ad")" "$R" "$(ss -tuln 2>/dev/null | grep -q ':40000' && echo "${GRN}有 (127.0.0.1:40000)${R}" || echo "${D}无${R}")"
+  local bbr_on=0 warp_on=0
+  [ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" = "bbr" ] && bbr_on=1
+  ss -tuln 2>/dev/null | grep -q ':40000' && warp_on=1
+  printf "  %s Hy2 h3 修复   %s BBR+FQ 加速   %s WARP 出口\n" \
+    "$(dot "$ad")" "$(dot "$bbr_on")" "$(dot "$warp_on")"
   # 资源条
   local mem_pct disk_pct
   mem_pct="$(free 2>/dev/null | awk '/^Mem:/{printf "%d", $3*100/$2}')"
@@ -137,7 +142,7 @@ dashboard() {
 
 # ---------- 节点与配置 ----------
 show_links() {
-  [ -z "$SERVER_IP" ] && warn "未设置 SERVER_IP，链接里的 IP 可能不准（菜单 10 里可填服务器公网 IP）。"
+  [ -z "$SERVER_IP" ] && warn "未设置 SERVER_IP，链接里的 IP 可能不准（菜单 11 里可填服务器公网 IP）。"
   run_script show-links
 }
 
@@ -236,7 +241,7 @@ PY
   done
   rm -rf "$tmp"
   echo
-  echo "${D}注：本机回连只验证服务端配置与出站；你客户端不通多半是握手/网络问题，对照菜单 3 的 Hy2 修复标记看。${R}"
+  echo "${D}注：本机回连只验证服务端配置与出站；你客户端不通多半是握手/网络问题，对照仪表盘上的 Hy2 h3 修复标记看。${R}"
 }
 
 # ---------- 服务与日志 ----------
@@ -333,18 +338,19 @@ edit_settings() {
   if confirm "现在重跑 install 让新设置生效（凭据不变）？"; then run_script install; else echo "下次重装时生效。"; fi
 }
 
-# ---------- 更新 ----------
+# ---------- 更新中心 ----------
 update_menu() {
   while true; do
     hr
-    printf "%s更新%s\n" "$BCYN" "$R"
+    printf "%s更新中心%s\n" "$BCYN" "$R"
     cat <<EOF
-  1) 用本机脚本重装（/root/mybox-install.sh，应用已有修复）
-  2) 从 GitHub 拉最新脚本并重装
+  1) 用本机脚本重装（应用已有修复，凭据复用）
+  2) 从 GitHub 拉最新安装脚本并重装
   3) 更新面板自身（从 GitHub 拉 mybox-panel.sh）
+  4) Sing-box 内核版本管理（更新 / 切换 / 指定版本）
   0) 返回
 EOF
-    printf "请选择 [0-3]: "; read -r c || return 0
+    printf "请选择 [0-4]: "; read -r c || return 0
     case "$c" in
       1) confirm "重跑 install？（凭据复用，服务会重启）" && run_script install ;;
       2)
@@ -360,6 +366,175 @@ EOF
           exit 0
         else err "下载或校验失败，面板未更新"; rm -f /tmp/mybox-panel.new; fi
         ;;
+      4) kernel_menu ;;
+      0) return 0 ;;
+      *) err "无效选择" ;;
+    esac
+  done
+}
+
+# ---------- Sing-box 内核版本 ----------
+kernel_current() { "$BIN" version 2>/dev/null | awk '/version/{print $NF; exit}'; }
+
+switch_kernel() { # switch_kernel 目标版本（不带 v 前缀）
+  local want="$1" arch name api digest tmp newbin cur
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;; aarch64) arch=arm64 ;;
+    *) err "不支持的架构：$(uname -m)"; return 0 ;;
+  esac
+  name="sing-box-${want}-linux-${arch}.tar.gz"
+  api="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${want}"
+  echo "获取 v${want} 官方发布摘要…"
+  digest="$(curl -fsSL "$api" 2>/dev/null | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+name=sys.argv[1]
+for a in d.get("assets",[]):
+    if a["name"]==name: print((a.get("digest") or "").removeprefix("sha256:")); break
+' "$name")"
+  [ -n "$digest" ] || { err "取不到 v${want} 的官方摘要（版本不存在或网络问题），已中止"; return 0; }
+  tmp="$(mktemp -d)"
+  echo "下载 $name …"
+  if ! curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${want}/${name}" -o "$tmp/pkg.tar.gz"; then
+    err "下载失败，已中止"; rm -rf "$tmp"; return 0
+  fi
+  if ! echo "$digest  $tmp/pkg.tar.gz" | sha256sum -c - >/dev/null 2>&1; then
+    err "SHA256 校验不通过，已中止（文件未替换）"; rm -rf "$tmp"; return 0
+  fi
+  ok "官方摘要校验通过"
+  tar xzf "$tmp/pkg.tar.gz" -C "$tmp" || { err "解压失败"; rm -rf "$tmp"; return 0; }
+  newbin="$tmp/sing-box-${want}-linux-${arch}/sing-box"
+  [ -x "$newbin" ] || { err "压缩包里找不到 sing-box 二进制"; rm -rf "$tmp"; return 0; }
+  if [ -f "$CONF" ] && ! "$newbin" check -c "$CONF" >/dev/null 2>&1; then
+    err "新版本与现有配置不兼容（sing-box check 未通过），已中止，旧版本未动"
+    rm -rf "$tmp"; return 0
+  fi
+  cur="$(kernel_current)"
+  [ -x "$BIN" ] && cp -a "$BIN" "$BIN.bak"
+  install -m 755 "$newbin" "$BIN"
+  rm -rf "$tmp"
+  systemctl restart "$SERVICE" 2>/dev/null
+  sleep 1
+  if svc_active && [ "$(kernel_current)" = "$want" ]; then
+    SB_VERSION="$want"; save_panel_conf
+    ok "已切换到 sing-box v${want}（原 v${cur:-未知}），并写入面板设置，后续重装保持此版本"
+  else
+    err "新版本启动失败，正在回滚…"
+    [ -f "$BIN.bak" ] && install -m 755 "$BIN.bak" "$BIN"
+    systemctl restart "$SERVICE" 2>/dev/null
+    err "已回滚到原版本：$(kernel_current)"
+  fi
+}
+
+kernel_menu() {
+  while true; do
+    hr
+    printf "%sSing-box 内核%s  当前运行：%s%s%s   面板锁定：v%s\n" \
+      "$BCYN" "$R" "$B" "$(kernel_current || echo 未安装)" "$R" "$SB_VERSION"
+    cat <<EOF
+  1) 更新到最新版（查 GitHub 最新 release）
+  2) 指定版本切换（从最近版本里选，或手动输入）
+  3) 恢复为面板锁定版本（v$SB_VERSION）
+  0) 返回
+EOF
+    printf "请选择 [0-3]: "; read -r c || return 0
+    case "$c" in
+      1)
+        local latest
+        latest="$(curl -fsSL https://api.github.com/repos/SagerNet/sing-box/releases/latest 2>/dev/null \
+          | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null)"
+        [ -n "$latest" ] || { err "查不到最新版本（网络问题）"; continue; }
+        echo "最新版：v${latest}，当前：v$(kernel_current)"
+        [ "$latest" = "$(kernel_current)" ] && { ok "已经是最新版"; continue; }
+        confirm "更新到 v${latest}？" && switch_kernel "$latest"
+        ;;
+      2)
+        echo "最近版本："
+        local tags i=1 t picked
+        tags="$(curl -fsSL "https://api.github.com/repos/SagerNet/sing-box/releases?per_page=8" 2>/dev/null \
+          | python3 -c 'import json,sys
+try:
+  for r in json.load(sys.stdin): print(r.get("tag_name","").lstrip("v"))
+except Exception: pass' 2>/dev/null)"
+        if [ -n "$tags" ]; then
+          while IFS= read -r t; do echo "  $i) v$t"; i=$((i+1)); done <<< "$tags"
+        else
+          warn "拉不到版本列表，可直接手动输入版本号"
+        fi
+        printf "输入编号或完整版本号（如 1.13.3），回车取消: "
+        read -r picked || continue
+        [ -z "$picked" ] && continue
+        if [[ "$picked" =~ ^[0-9]+$ ]] && [ -n "$tags" ]; then
+          picked="$(sed -n "${picked}p" <<< "$tags")"
+          [ -n "$picked" ] || { err "编号超出范围"; continue; }
+        fi
+        picked="${picked#v}"
+        confirm "切换到 v${picked}？" && switch_kernel "$picked"
+        ;;
+      3) [ "$(kernel_current)" = "$SB_VERSION" ] && ok "已在锁定版本" || { confirm "恢复为 v${SB_VERSION}？" && switch_kernel "$SB_VERSION"; } ;;
+      0) return 0 ;;
+      *) err "无效选择" ;;
+    esac
+  done
+}
+
+# ---------- BBR + FQ 加速（内核原版） ----------
+bbr_status() {
+  local cc av qd iface tcq
+  cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')"
+  av="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo '?')"
+  qd="$(sysctl -n net.core.default_qdisc 2>/dev/null || echo '?')"
+  iface="$(ip route 2>/dev/null | awk '/default/{print $5; exit}')"
+  tcq="$(tc qdisc show dev "$iface" 2>/dev/null | head -n 1)"
+  printf "当前拥塞控制：%s%s%s（可选：%s）\n" "$B" "$cc" "$R" "$av"
+  printf "默认队列规则：%s%s%s\n" "$B" "$qd" "$R"
+  [ -n "$tcq" ] && printf "网卡 %s 队列：%s\n" "$iface" "$tcq"
+  if [ "$cc" = "bbr" ] && [ "$qd" = "fq" ]; then ok "BBR + FQ 已开启（内核原版）"; else warn "尚未开启 BBR + FQ"; fi
+}
+
+bbr_on() {
+  confirm "一键开启内核原版 BBR + FQ？（写 /etc/sysctl.d/99-mybox-bbr.conf，立即生效，重启不丢）" || { echo "已取消"; return 0; }
+  modprobe tcp_bbr 2>/dev/null || true
+  if ! sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
+    err "当前内核没有 bbr 模块（容器/OpenVZ 内核常见），无法开启"; return 0
+  fi
+  echo "tcp_bbr" > /etc/modules-load.d/mybox-bbr.conf 2>/dev/null || true
+  cat > /etc/sysctl.d/99-mybox-bbr.conf <<'EOF'
+# mybox panel: BBR + FQ
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+EOF
+  sysctl -p /etc/sysctl.d/99-mybox-bbr.conf >/dev/null 2>&1
+  local iface; iface="$(ip route 2>/dev/null | awk '/default/{print $5; exit}')"
+  [ -n "$iface" ] && tc qdisc replace dev "$iface" root fq 2>/dev/null || true
+  bbr_status
+}
+
+bbr_off() {
+  confirm "关闭 BBR + FQ，恢复 cubic + fq_codel？" || { echo "已取消"; return 0; }
+  rm -f /etc/sysctl.d/99-mybox-bbr.conf /etc/modules-load.d/mybox-bbr.conf
+  sysctl -w net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1
+  sysctl -w net.core.default_qdisc=fq_codel >/dev/null 2>&1
+  local iface; iface="$(ip route 2>/dev/null | awk '/default/{print $5; exit}')"
+  [ -n "$iface" ] && tc qdisc replace dev "$iface" root fq_codel 2>/dev/null || true
+  bbr_status
+}
+
+bbr_menu() {
+  while true; do
+    hr
+    printf "%s网络加速 · 原版 BBR + FQ%s\n" "$BCYN" "$R"
+    bbr_status
+    cat <<EOF
+  1) 一键开启 BBR + FQ
+  2) 关闭（恢复 cubic + fq_codel）
+  0) 返回
+EOF
+    printf "请选择 [0-2]: "; read -r c || return 0
+    case "$c" in
+      1) bbr_on ;;
+      2) bbr_off ;;
       0) return 0 ;;
       *) err "无效选择" ;;
     esac
@@ -427,15 +602,16 @@ while true; do
    ${B} 7${R}  流量统计
    ${B} 8${R}  系统信息
    ${B} 9${R}  出口测试
+   ${B}10${R}  BBR 加速 ${D}（原版 BBR + FQ 一键开关）${R}
  ${BCYN}▸ 设置${R}
-   ${B}10${R}  修改设置 ${D}（IP / 端口 / SNI）${R}
-   ${B}11${R}  更新 / 重装
-   ${B}12${R}  备份 / 恢复
-   ${B}13${R}  卸载 mybox
+   ${B}11${R}  修改设置 ${D}（IP / 端口 / SNI）${R}
+   ${B}12${R}  更新中心 ${D}（脚本 / 面板 / 内核版本）${R}
+   ${B}13${R}  备份 / 恢复
+   ${B}14${R}  卸载 mybox
    ${B} 0${R}  退出
 EOF
   hr
-  printf "%s请选择 [0-13]:%s " "$B" "$R"
+  printf "%s请选择 [0-14]:%s " "$B" "$R"
   read -r choice || exit 0
   case "$choice" in
     1)  show_links;    pause ;;
@@ -447,10 +623,11 @@ EOF
     7)  show_traffic;  pause ;;
     8)  show_sysinfo;  pause ;;
     9)  test_egress;   pause ;;
-    10) edit_settings; pause ;;
-    11) update_menu ;;
-    12) backup_menu ;;
-    13) uninstall_box; pause ;;
+    10) bbr_menu ;;
+    11) edit_settings; pause ;;
+    12) update_menu ;;
+    13) backup_menu ;;
+    14) uninstall_box; pause ;;
     0)  printf "%s再见 👋%s\n" "$D" "$R"; exit 0 ;;
     *)  err "无效选择" ;;
   esac
