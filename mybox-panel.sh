@@ -10,7 +10,7 @@
 # =============================================================================
 set -uo pipefail
 
-PANEL_VERSION="2.9"
+PANEL_VERSION="2.10"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -191,9 +191,9 @@ status_block() { # 卡片式状态区：状态卡 + 节点卡（开放式右边�
   local svc_txt warp_txt
   if svc_active; then svc_txt="${BGRN}● 运行中${R}"; else svc_txt="${BRED}● 未运行${R}"; fi
   if ss -tuln 2>/dev/null | grep -q ':40000'; then
-    warp_txt="直连 + WARP 分流口 40000 已开"
+    warp_txt="直连 + WARP 分流口 40000 已开（非 mybox 自带）"
   else
-    warp_txt="直连（WARP 未启动）"
+    warp_txt="直连（无 WARP 分流口）"
   fi
   local hy2mark vmpath="-"
   if [ -f "$CONF" ] && grep -A20 '"hysteria2"' "$CONF" | grep -q '"h3"'; then
@@ -216,7 +216,7 @@ status_block() { # 卡片式状态区：状态卡 + 节点卡（开放式右边�
   printf "%s│%s  服务状态  %s\n" "$dgray" "$R" "$svc_txt"
   printf "%s│%s  核心版本  %ssing-box %s%s" "$dgray" "$R" "$white" "$cur" "$R"
   if [ "$latest" != "未知" ] && [ "$latest" != "$cur" ]; then
-    printf "  %s新版 %s 可用（13 → 4 更新）%s" "$gold" "$latest" "$R"
+    printf "  %s新版 %s 可用（菜单 13 → 内核版本管理更新）%s" "$gold" "$latest" "$R"
   fi
   echo
   printf "%s│%s  系统环境  %s%s · %s · %s%s\n" "$dgray" "$R" "$gray" "$os" "$(uname -m)" "$(systemd-detect-virt 2>/dev/null || echo 未知)" "$R"
@@ -226,18 +226,25 @@ status_block() { # 卡片式状态区：状态卡 + 节点卡（开放式右边�
   printf "%s│%s  资源占用  %s内存 %s   磁盘 %s%s\n" "$dgray" "$R" "$gray" "$(bar "$mem_pct" 10)" "$(bar "$disk_pct" 10)" "$R"
   printf "%s╰──────────────────────────────────────────────────────────────%s\n" "$dgray" "$R"
   echo
+  # 节点卡上的圆点是实时监听状态（绿=端口在监听，红=未监听），不是只读配置
+  local dot_vless dot_vmess dot_hy2 dot_tuic dot_anytls
+  listening "$PORT_VLESS" && dot_vless="${BGRN}●${R}" || dot_vless="${BRED}●${R}"
+  listening "$PORT_VMESS" && dot_vmess="${BGRN}●${R}" || dot_vmess="${BRED}●${R}"
+  listening "$PORT_HY2"   && dot_hy2="${BGRN}●${R}"   || dot_hy2="${BRED}●${R}"
+  listening "$PORT_TUIC"  && dot_tuic="${BGRN}●${R}"  || dot_tuic="${BRED}●${R}"
+  listening "$PORT_ANYTLS" && dot_anytls="${BGRN}●${R}" || dot_anytls="${BRED}●${R}"
   printf "%s╭─ 节点 %s─────────────────────────────────────────────────────%s\n" "$gold" "$dgray" "$R"
-  printf "%s│%s  %sVLESS     %s %s%6s%s  %sReality · %s%s\n" "$dgray" "$R" "$white" "$R" "$gold" "$PORT_VLESS" "$R" "$gray" "$REALITY_SNI" "$R"
-  printf "%s│%s  %sVMESS     %s %s%6s%s  %sWebSocket · TLS 关闭 · %s%s\n" "$dgray" "$R" "$white" "$R" "$gold" "$PORT_VMESS" "$R" "$gray" "$vmpath" "$R"
-  printf "%s│%s  %sHYSTERIA2 %s %s%6s%s  %s自签证书 · %s\n" "$dgray" "$R" "$white" "$R" "$gold" "$PORT_HY2" "$R" "$gray" "$hy2mark"
-  printf "%s│%s  %sTUIC      %s %s%6s%s  %s自签证书 · BBR 拥塞%s\n" "$dgray" "$R" "$white" "$R" "$gold" "$PORT_TUIC" "$R" "$gray" "$R"
-  printf "%s│%s  %sANYTLS    %s %s%6s%s  %s自签证书%s\n" "$dgray" "$R" "$white" "$R" "$gold" "$PORT_ANYTLS" "$R" "$gray" "$R"
+  printf "%s│%s  %s %sVLESS     %s %s%6s%s  %sReality · %s%s\n" "$dgray" "$R" "$dot_vless" "$white" "$R" "$gold" "$PORT_VLESS" "$R" "$gray" "$REALITY_SNI" "$R"
+  printf "%s│%s  %s %sVMESS     %s %s%6s%s  %sWebSocket · TLS 关闭 · %s%s\n" "$dgray" "$R" "$dot_vmess" "$white" "$R" "$gold" "$PORT_VMESS" "$R" "$gray" "$vmpath" "$R"
+  printf "%s│%s  %s %sHYSTERIA2 %s %s%6s%s  %s自签证书 · %s\n" "$dgray" "$R" "$dot_hy2" "$white" "$R" "$gold" "$PORT_HY2" "$R" "$gray" "$hy2mark"
+  printf "%s│%s  %s %sTUIC      %s %s%6s%s  %s自签证书 · BBR 拥塞%s\n" "$dgray" "$R" "$dot_tuic" "$white" "$R" "$gold" "$PORT_TUIC" "$R" "$gray" "$R"
+  printf "%s│%s  %s %sANYTLS    %s %s%6s%s  %s自签证书%s\n" "$dgray" "$R" "$dot_anytls" "$white" "$R" "$gold" "$PORT_ANYTLS" "$R" "$gray" "$R"
   printf "%s╰──────────────────────────────────────────────────────────────%s\n" "$dgray" "$R"
 }
 
 # ---------- 节点与配置 ----------
 show_links() {
-  [ -z "$SERVER_IP" ] && warn "未设置 SERVER_IP，链接里的 IP 可能不准（菜单 11 里可填服务器公网 IP）。"
+  [ -z "$SERVER_IP" ] && warn "未设置 SERVER_IP，链接里的 IP 可能不准（菜单 12 参数设置里可填服务器公网 IP）。"
   run_script show-links
 }
 
@@ -260,7 +267,11 @@ show_qr() {
 }
 
 show_clash() {
-  if [ -f "$DIR/client/clash.yaml" ]; then cat "$DIR/client/clash.yaml"
+  if [ -f "$DIR/client/clash.yaml" ]; then
+    printf "%s文件：%s%s  节点数：%s\n" "$D" "$DIR/client/clash.yaml" "$R" \
+      "$(grep -c '^  - name: mybox-' "$DIR/client/clash.yaml" 2>/dev/null || echo '?')"
+    cat "$DIR/client/clash.yaml"
+    printf "\n%s导出到本机：cp %s/client/clash.yaml ~/mybox-clash.yaml%s\n" "$D" "$DIR" "$R"
   else err "还没有 Clash 配置，先跑一次菜单 1 或重装。"; fi
 }
 
@@ -442,6 +453,12 @@ EOF
 # ---------- 流量与系统 ----------
 show_traffic() {
   if command -v vnstat >/dev/null 2>&1; then
+    # 菜单写的是“按日 / 按月”，这里就真给按日和按月两张表，而不是只给一行总计
+    echo "── 按日（最近 7 天）──"
+    vnstat -d 2>/dev/null | sed -n '/day/,/^$/p' | tail -n +2 | head -n 10
+    echo "── 按月 ──"
+    vnstat -m 2>/dev/null | sed -n '/month/,/^$/p' | tail -n +2 | head -n 10
+    echo "── 总计 ──"
     vnstat --oneline 2>/dev/null || vnstat 2>/dev/null | head -n 20
   else
     local iface rx tx
@@ -460,6 +477,14 @@ show_sysinfo() {
   printf "%s负载%s %s\n" "$D" "$R" "$(awk '{print $1, $2, $3}' /proc/loadavg)  （$(nproc 2>/dev/null || echo '?') 核）"
   free -h 2>/dev/null | awk 'NR<=2'
   df -h / 2>/dev/null | awk 'NR<=2'
+  # 菜单承诺的“监听端口总览”原来没给，这里补上：五协议端口的实时监听状态
+  echo "${D}监听端口（五协议）：${R}"
+  local p proto state
+  for p in "$PORT_VLESS" "$PORT_VMESS" "$PORT_ANYTLS" "$PORT_HY2" "$PORT_TUIC"; do
+    case "$p" in "$PORT_HY2"|"$PORT_TUIC") proto="UDP";; *) proto="TCP";; esac
+    if listening "$p"; then state="${BGRN}监听中${R}"; else state="${BRED}未监听${R}"; fi
+    printf "  %s/%s  %s\n" "$p" "$proto" "$state"
+  done
   echo "${D}内存占用前五进程：${R}"
   ps aux --sort=-%mem 2>/dev/null | head -n 6
 }

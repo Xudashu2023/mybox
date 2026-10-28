@@ -189,6 +189,15 @@ load_or_create_creds() {
     # shellcheck disable=SC1090
     set -a; . "$CREDS"; set +a
     log "复用已有凭据（$CREDS）"
+    # 凭据不完整时绝不能带着空值往下写配置（会生成一条“能通过 check、但谁也连不上”的坏配置），
+    # 直接停下来说明原因，让人备份后删文件重装，而不是悄悄生成坏节点
+    local missing_creds="" k
+    for k in UUID_VLESS UUID_VMESS UUID_TUIC PASS_ANYTLS PASS_HY2 PASS_TUIC REALITY_PRIV REALITY_PUB SHORT_ID VMESS_PATH; do
+      [ -n "${!k:-}" ] || missing_creds="$missing_creds $k"
+    done
+    if [ -n "$missing_creds" ]; then
+      die "凭据文件不完整，缺：$missing_creds。请先备份 $CREDS，再删除它后重跑 install 重新生成全套（注意：五条客户端链接会全部变）"
+    fi
     if [ -z "${PASS_OBFS:-}" ]; then
       PASS_OBFS="$(openssl rand -base64 18 | tr -d '\n')"
       printf "PASS_OBFS='%s'\n" "$PASS_OBFS" >> "$CREDS"
@@ -243,7 +252,7 @@ install_core() {
   url="https://github.com/SagerNet/sing-box/releases/download/v${SB_VERSION}/${name}"
   api="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${SB_VERSION}"
   log "获取官方发布摘要……"
-  digest="$(curl -fsSL "$api" | python3 -c '
+  digest="$(curl -fsSL --retry 2 --max-time 20 "$api" | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
 name=sys.argv[1]
@@ -503,6 +512,25 @@ do_install() {
   write_unit
   systemctl enable --now mybox >/dev/null 2>&1 || systemctl restart mybox
   open_firewall
+  # 装后核验：以前这里只打印“完成”，服务起没起来、端口有没有在监听都不查，
+  # 这次装完当场验，起不来直接报错停下，不留一个“看着装完了、其实连不上”的状态
+  if [ "$(systemctl is-active mybox 2>/dev/null)" != "active" ]; then
+    warn "mybox 服务未进入 active，最近日志："
+    journalctl -u mybox --no-pager -n 20 2>/dev/null || true
+    die "安装未完成：mybox 服务未正常运行，旧配置备份在 $DIR/backup/，先看日志再重装"
+  fi
+  local missing_ports="" pp
+  for pp in "$PORT_VLESS" "$PORT_VMESS" "$PORT_ANYTLS"; do
+    ss -tln 2>/dev/null | grep -q ":$pp[[:space:]]" || missing_ports="$missing_ports $pp(TCP)"
+  done
+  for pp in "$PORT_HY2" "$PORT_TUIC"; do
+    ss -uln 2>/dev/null | grep -q ":$pp[[:space:]]" || missing_ports="$missing_ports $pp(UDP)"
+  done
+  if [ -n "$missing_ports" ]; then
+    warn "服务在运行，但以下端口未在监听，客户端可能连不上：$missing_ports（先查防火墙与端口占用）"
+  else
+    log "服务运行中，五协议端口均已在监听"
+  fi
   local ip; ip="$(detect_ip)"
   if [ -n "$ip" ]; then
     export CERT_CN
