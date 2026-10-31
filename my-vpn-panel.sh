@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # =============================================================================
-# mybox 面板 v2 —— 在服务器上输入 mybox 调出（安装到 /usr/local/bin/mybox）
+# My-vpn 面板 v2 —— 在服务器上输入 my-vpn 调出（安装到 /usr/local/bin/my-vpn）
 #
-# 彩色仪表盘 + 功能菜单。所有装/改/卸仍走 mybox-install.sh 的子命令，
+# 彩色仪表盘 + 功能菜单。所有装/改/卸仍走 my-vpn-install.sh 的子命令，
 # 面板只是交互外壳，配置与凭据始终只有一份真相。
 #
-# 面板自己的设置存 /etc/mybox/panel.conf（SERVER_IP、端口、REALITY_SNI、
+# 面板自己的设置存 /etc/my-vpn/panel.conf（SERVER_IP、端口、REALITY_SNI、
 # CERT_CN），调用 install / show-links 时以环境变量传入（脚本原生支持）。
 # =============================================================================
 set -uo pipefail
 
 PANEL_VERSION="2.10"
-DIR="/etc/mybox"
+DIR="/etc/my-vpn"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
 PANEL_CONF="$DIR/panel.conf"
-SCRIPT="/root/mybox-install.sh"
-PANEL_SELF="/usr/local/bin/mybox"
+SCRIPT="/root/my-vpn-install.sh"
+PANEL_SELF="/usr/local/bin/my-vpn"
 BIN="/usr/local/bin/sing-box"
-SERVICE="mybox"
-RAW_BASE="https://raw.githubusercontent.com/Xudashu2023/mybox/main"
-BACKUP_DIR="/root/mybox-backups"
+SERVICE="my-vpn"
+RAW_BASE="https://raw.githubusercontent.com/Xudashu2023/My-vpn/main"
+BACKUP_DIR="/root/my-vpn-backups"
 
 # ---------- 颜色（仅终端下启用；NO_COLOR / FORCE_COLOR 可覆盖） ----------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then COLOR=1; else COLOR=0; fi
@@ -61,10 +61,10 @@ confirm() {
 hr() { printf "%s────────────────────────────────────────────────────────────%s\n" "$D" "$R"; }
 
 # ---------- 基础 ----------
-[ "$(id -u)" -eq 0 ] || { err "需要 root 运行：请用 root 登录或 sudo mybox"; exit 1; }
-[ -f "$SCRIPT" ] || { err "找不到 $SCRIPT（mybox 安装脚本），面板无法工作"; exit 1; }
+[ "$(id -u)" -eq 0 ] || { err "需要 root 运行：请用 root 登录或 sudo my-vpn"; exit 1; }
+[ -f "$SCRIPT" ] || { err "找不到 $SCRIPT（my-vpn 安装脚本），面板无法工作"; exit 1; }
 
-# 默认值与 mybox-install.sh 保持一致；panel.conf 可覆盖
+# 默认值与 my-vpn-install.sh 保持一致；panel.conf 可覆盖
 SERVER_IP=""
 PORT_VLESS=40136; PORT_VMESS=2082; PORT_ANYTLS=20917; PORT_HY2=41413; PORT_TUIC=59899
 REALITY_SNI="apple.com"; CERT_CN="www.bing.com"
@@ -114,12 +114,12 @@ svc_active() { [ "$(systemctl is-active "$SERVICE" 2>/dev/null)" = "active" ]; }
 SEP="$R"   # 分隔线颜色在 COLOR 启用时覆盖
 [ "$COLOR" = "1" ] && SEP=$'\033[38;5;203m'
 
-banner_art() { # MY BOX 主标：逐行渐变（青→蓝→紫→粉），ASCII 占位符不依赖 locale
+banner_art() { # MY VPN 主标：逐行渐变（青→蓝→紫→粉），ASCII 占位符不依赖 locale
   local M_=("#   #" "## ##" "# # #" "#   #" "#   #")
   local Y_=("#   #" " # # " "  #  " "  #  " "  #  ")
-  local B_=("#### " "#   #" "#### " "#   #" "#### ")
-  local O_=(" ### " "#   #" "#   #" "#   #" " ### ")
-  local X_=("#   #" " # # " "  #  " " # # " "#   #")
+  local V_=("#   #" " # # " " # # " "  #  " "  #  ")
+  local P_=("#### " "#   #" "#### " "#    " "#    ")
+  local N_=("#   #" "##  #" "# # #" "#  ##" "#   #")
   local grad=("" "" "" "" "") r row ch i
   if [ "$COLOR" = "1" ]; then
     grad=($'\033[38;5;81m' $'\033[38;5;75m' $'\033[38;5;105m' $'\033[38;5;141m' $'\033[38;5;176m')
@@ -127,7 +127,7 @@ banner_art() { # MY BOX 主标：逐行渐变（青→蓝→紫→粉），ASCII
   echo
   for r in 0 1 2 3 4; do
     row="  ${grad[$r]}"
-    local parts=("${M_[$r]}" "${Y_[$r]}" "${B_[$r]}" "${O_[$r]}" "${X_[$r]}")
+    local parts=("${M_[$r]}" "${Y_[$r]}" "${V_[$r]}" "${P_[$r]}" "${N_[$r]}")
     for i in 0 1 2 3 4; do
       local s="${parts[$i]}"
       while [ -n "$s" ]; do
@@ -193,7 +193,7 @@ status_block() { # 卡片式状态区：状态卡 + 节点卡（开放式右边�
   local svc_txt warp_txt
   if svc_active; then svc_txt="${BGRN}● 运行中${R}"; else svc_txt="${BRED}● 未运行${R}"; fi
   if ss -tuln 2>/dev/null | grep -q ':40000'; then
-    warp_txt="直连 + WARP 分流口 40000 已开（非 mybox 自带）"
+    warp_txt="直连 + WARP 分流口 40000 已开（非 my-vpn 自带）"
   else
     warp_txt="直连（无 WARP 分流口）"
   fi
@@ -258,7 +258,7 @@ show_qr() {
   fi
   [ -f "$DIR/client/links.txt" ] || { err "链接文件不存在，先跑一次菜单 1。"; return 0; }
   echo "选择要显示二维码的节点："
-  local i=1 names=("mybox-vless" "mybox-vmess" "mybox-anytls" "mybox-hy2" "mybox-tuic") sel
+  local i=1 names=("my-vpn-vless" "my-vpn-vmess" "my-vpn-anytls" "my-vpn-hy2" "my-vpn-tuic") sel
   for n in "${names[@]}"; do echo "  $i) $n"; i=$((i+1)); done
   printf "编号 [1-5]: "; read -r sel || return 0
   case "$sel" in 1|2|3|4|5) ;; *) err "无效编号"; return 0;; esac
@@ -271,9 +271,9 @@ show_qr() {
 show_clash() {
   if [ -f "$DIR/client/clash.yaml" ]; then
     printf "%s文件：%s%s  节点数：%s\n" "$D" "$DIR/client/clash.yaml" "$R" \
-      "$(grep -c '^  - name: mybox-' "$DIR/client/clash.yaml" 2>/dev/null || echo '?')"
+      "$(grep -c '^  - name: my-vpn-' "$DIR/client/clash.yaml" 2>/dev/null || echo '?')"
     cat "$DIR/client/clash.yaml"
-    printf "\n%s导出到本机：cp %s/client/clash.yaml ~/mybox-clash.yaml%s\n" "$D" "$DIR" "$R"
+    printf "\n%s导出到本机：cp %s/client/clash.yaml ~/my-vpn-clash.yaml%s\n" "$D" "$DIR" "$R"
   else err "还没有 Clash 配置，先跑一次菜单 1 或重装。"; fi
 }
 
@@ -281,7 +281,7 @@ show_clash() {
 # ---------- 测试配置生成（自测 / 测速共用） ----------
 gen_test_configs() { # $1=目标目录：按凭据生成五份本机回连客户端配置（mixed 18101）
   local tmp="$1"
-  # 生成五份客户端配置（python3 是 mybox 的既有依赖）
+  # 生成五份客户端配置（python3 是 my-vpn 的既有依赖）
   CREDS="$CREDS" TESTDIR="$tmp" \
   PORT_VLESS="$PORT_VLESS" PORT_VMESS="$PORT_VMESS" PORT_ANYTLS="$PORT_ANYTLS" \
   PORT_HY2="$PORT_HY2" PORT_TUIC="$PORT_TUIC" \
@@ -330,7 +330,7 @@ PY
 self_test() {
   [ -x "$BIN" ] || { err "找不到 sing-box 二进制 $BIN"; return 0; }
   [ -f "$CREDS" ] || { err "找不到凭据文件 $CREDS"; return 0; }
-  svc_active || { err "mybox 服务未运行，先启动服务（菜单 6）。"; return 0; }
+  svc_active || { err "my-vpn 服务未运行，先启动服务（菜单 6）。"; return 0; }
   echo "将逐个协议在本机回连测试（经节点访问 ipify，看出口与延迟）…"
   local tmp; tmp="$(mktemp -d)"
   gen_test_configs "$tmp" || { err "生成测试配置失败"; rm -rf "$tmp"; return 0; }
@@ -365,7 +365,7 @@ self_test() {
 speed_test() { # 逐协议测速：本机回连 + Cloudflare 15MB 下载测速
   [ -x "$BIN" ] || { err "找不到 sing-box 二进制 $BIN"; return 0; }
   [ -f "$CREDS" ] || { err "找不到凭据文件 $CREDS"; return 0; }
-  svc_active || { err "mybox 服务未运行，先启动服务（菜单 6）。"; return 0; }
+  svc_active || { err "my-vpn 服务未运行，先启动服务（菜单 6）。"; return 0; }
   echo "将逐个协议测速（本机回连，经节点下载 15MB 测速文件，每个协议最长约 25 秒）…"
   local tmp; tmp="$(mktemp -d)"
   gen_test_configs "$tmp" || { err "生成测试配置失败"; rm -rf "$tmp"; return 0; }
@@ -525,7 +525,7 @@ update_menu() {
     cat <<EOF
   1) 用本机脚本重装（应用已有修复，凭据复用）
   2) 从 GitHub 拉最新安装脚本并重装
-  3) 更新面板自身（从 GitHub 拉 mybox-panel.sh）
+  3) 更新面板自身（从 GitHub 拉 my-vpn-panel.sh）
   4) Sing-box 内核版本管理（更新 / 切换 / 指定版本）
   0) 返回
 EOF
@@ -533,17 +533,17 @@ EOF
     case "$c" in
       1) confirm "重跑 install？（凭据复用，服务会重启）" && run_script install ;;
       2)
-        if curl -fsSL "$RAW_BASE/mybox-install.sh?t=$(date +%s)" -o "$SCRIPT.new" && bash -n "$SCRIPT.new"; then
+        if curl -fsSL "$RAW_BASE/my-vpn-install.sh?t=$(date +%s)" -o "$SCRIPT.new" && bash -n "$SCRIPT.new"; then
           mv "$SCRIPT.new" "$SCRIPT"; ok "脚本已更新到最新版"
           confirm "现在重装？" && run_script install
         else err "下载或校验失败，未替换现有脚本"; rm -f "$SCRIPT.new"; fi
         ;;
       3)
-        if curl -fsSL "$RAW_BASE/mybox-panel.sh?t=$(date +%s)" -o "/tmp/mybox-panel.new" && bash -n /tmp/mybox-panel.new; then
-          install -m 755 /tmp/mybox-panel.new "$PANEL_SELF"; rm -f /tmp/mybox-panel.new
-          ok "面板已更新，重新运行 mybox 生效"
+        if curl -fsSL "$RAW_BASE/my-vpn-panel.sh?t=$(date +%s)" -o "/tmp/my-vpn-panel.new" && bash -n /tmp/my-vpn-panel.new; then
+          install -m 755 /tmp/my-vpn-panel.new "$PANEL_SELF"; rm -f /tmp/my-vpn-panel.new
+          ok "面板已更新，重新运行 my-vpn 生效"
           exit 0
-        else err "下载或校验失败，面板未更新"; rm -f /tmp/mybox-panel.new; fi
+        else err "下载或校验失败，面板未更新"; rm -f /tmp/my-vpn-panel.new; fi
         ;;
       4) kernel_menu ;;
       0) return 0 ;;
@@ -673,18 +673,18 @@ bbr_status() {
 }
 
 bbr_on() {
-  confirm "一键开启内核原版 BBR + FQ？（写 /etc/sysctl.d/99-mybox-bbr.conf，立即生效，重启不丢）" || { echo "已取消"; return 0; }
+  confirm "一键开启内核原版 BBR + FQ？（写 /etc/sysctl.d/99-my-vpn-bbr.conf，立即生效，重启不丢）" || { echo "已取消"; return 0; }
   modprobe tcp_bbr 2>/dev/null || true
   if ! sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
     err "当前内核没有 bbr 模块（容器/OpenVZ 内核常见），无法开启"; return 0
   fi
-  echo "tcp_bbr" > /etc/modules-load.d/mybox-bbr.conf 2>/dev/null || true
-  cat > /etc/sysctl.d/99-mybox-bbr.conf <<'EOF'
-# mybox panel: BBR + FQ
+  echo "tcp_bbr" > /etc/modules-load.d/my-vpn-bbr.conf 2>/dev/null || true
+  cat > /etc/sysctl.d/99-my-vpn-bbr.conf <<'EOF'
+# My-vpn panel: BBR + FQ
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
-  sysctl -p /etc/sysctl.d/99-mybox-bbr.conf >/dev/null 2>&1
+  sysctl -p /etc/sysctl.d/99-my-vpn-bbr.conf >/dev/null 2>&1
   local iface; iface="$(ip route 2>/dev/null | awk '/default/{print $5; exit}')"
   [ -n "$iface" ] && tc qdisc replace dev "$iface" root fq 2>/dev/null || true
   bbr_status
@@ -692,7 +692,7 @@ EOF
 
 bbr_off() {
   confirm "关闭 BBR + FQ，恢复 cubic + fq_codel？" || { echo "已取消"; return 0; }
-  rm -f /etc/sysctl.d/99-mybox-bbr.conf /etc/modules-load.d/mybox-bbr.conf
+  rm -f /etc/sysctl.d/99-my-vpn-bbr.conf /etc/modules-load.d/my-vpn-bbr.conf
   sysctl -w net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1
   sysctl -w net.core.default_qdisc=fq_codel >/dev/null 2>&1
   local iface; iface="$(ip route 2>/dev/null | awk '/default/{print $5; exit}')"
@@ -724,7 +724,7 @@ EOF
 backup_menu() {
   while true; do
     hr
-    printf "%s备份 / 恢复%s（范围：整个 /etc/mybox，含凭据与配置）\n" "$BCYN" "$R"
+    printf "%s备份 / 恢复%s（范围：整个 /etc/my-vpn，含凭据与配置）\n" "$BCYN" "$R"
     cat <<EOF
   1) 立即备份
   2) 从备份恢复
@@ -734,8 +734,8 @@ EOF
     case "$c" in
       1)
         mkdir -p "$BACKUP_DIR"
-        local f="$BACKUP_DIR/mybox-$(date +%Y%m%d-%H%M%S).tar.gz"
-        tar czf "$f" -C / "etc/mybox" 2>/dev/null && { chmod 600 "$f"; ok "已备份：$f"; } || err "备份失败"
+        local f="$BACKUP_DIR/my-vpn-$(date +%Y%m%d-%H%M%S).tar.gz"
+        tar czf "$f" -C / "etc/my-vpn" 2>/dev/null && { chmod 600 "$f"; ok "已备份：$f"; } || err "备份失败"
         ;;
       2)
         local files=() i sel
@@ -746,7 +746,7 @@ EOF
         [ "$sel" = "0" ] && continue
         case "$sel" in ''|*[!0-9]*) err "无效编号"; continue;; esac
         [ "$sel" -ge 1 ] && [ "$sel" -le "${#files[@]}" ] || { err "无效编号"; continue; }
-        warn "恢复将覆盖当前 /etc/mybox（含凭据，节点链接会变回备份时的）。"
+        warn "恢复将覆盖当前 /etc/my-vpn（含凭据，节点链接会变回备份时的）。"
         if confirm "确定恢复 ${files[$((sel-1))]}？"; then
           tar xzf "${files[$((sel-1))]}" -C / && systemctl restart "$SERVICE" \
             && ok "已恢复并重启服务" || err "恢复失败，请检查备份文件"
@@ -760,10 +760,10 @@ EOF
 
 panel_purge() { # 面板自带完全卸载：不依赖安装脚本版本，逐项清干净，最后删面板自身
   run_script uninstall >/dev/null 2>&1 || true
-  systemctl disable --now mybox 2>/dev/null || true
-  rm -f /etc/systemd/system/mybox.service
+  systemctl disable --now my-vpn 2>/dev/null || true
+  rm -f /etc/systemd/system/my-vpn.service
   systemctl daemon-reload 2>/dev/null || true
-  systemctl reset-failed mybox 2>/dev/null || true
+  systemctl reset-failed my-vpn 2>/dev/null || true
   rm -f "$BIN" "$BIN.bak"
   if command -v ufw >/dev/null 2>&1; then
     local spec
@@ -778,9 +778,9 @@ panel_purge() { # 面板自带完全卸载：不依赖安装脚本版本，逐�
     done
     firewall-cmd --reload >/dev/null 2>&1 || true
   fi
-  rm -rf "$DIR" /root/mybox-backups
-  rm -f "$SCRIPT" /root/mybox-install.sh /root/mybox-panel.sh
-  rm -f /etc/sysctl.d/99-mybox-bbr.conf /etc/modules-load.d/mybox-bbr.conf
+  rm -rf "$DIR" /root/my-vpn-backups
+  rm -f "$SCRIPT" /root/my-vpn-install.sh /root/my-vpn-panel.sh
+  rm -f /etc/sysctl.d/99-my-vpn-bbr.conf /etc/modules-load.d/my-vpn-bbr.conf
   sysctl -w net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1 || true
   sysctl -w net.core.default_qdisc=fq_codel >/dev/null 2>&1 || true
   rm -f "$PANEL_SELF"
@@ -795,7 +795,7 @@ uninstall_box() {
   printf "请选择 [0=取消]："; read -r c || return 0
   case "$c" in
     1)
-      warn "普通卸载会删除 mybox 服务、/etc/mybox 配置与凭据，五条节点链接随即作废。"
+      warn "普通卸载会删除 my-vpn 服务、/etc/my-vpn 配置与凭据，五条节点链接随即作废。"
       confirm "确定普通卸载？" || { echo "已取消"; return 0; }
       run_script uninstall ;;
     2)
@@ -849,7 +849,7 @@ while true; do
   local_dgray=""; local_gold=""
   if [ "$COLOR" = "1" ]; then local_dgray=$'\033[38;5;240m'; local_gold=$'\033[38;5;214m'; fi
   printf "%s──────────────────────────────────────────────────────────────%s\n" "$local_dgray" "$R"
-  printf "  %smybox panel v%s · github.com/Xudashu2023/mybox%s\n" "$local_dgray" "$PANEL_VERSION" "$R"
+  printf "  %smy-vpn panel v%s · github.com/Xudashu2023/My-vpn%s\n" "$local_dgray" "$PANEL_VERSION" "$R"
   printf "  %s›%s 请输入编号 [0-15]：" "$local_gold" "$R"
   read -r choice || exit 0
   if [[ "$choice" =~ ^[0-9]+$ ]]; then choice=$((10#$choice)); fi

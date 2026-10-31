@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# mybox —— 个人纯净版 sing-box 五协议安装脚本
+# My-vpn —— 个人纯净版 sing-box 五协议安装脚本
 #
 # 只做三件事：装内核、写配置、起服务。
 # 没有菜单、没有订阅托管、没有 Argo/WARP/TG 推送、没有自更新、没有定时重启。
@@ -15,11 +15,11 @@
 #   Hysteria2 (UDP)     / TUIC (UDP)
 #
 # 用法：
-#   sudo bash mybox-install.sh install      安装或更新（可重复运行，凭据/端口不重置）
-#   sudo bash mybox-install.sh uninstall    普通卸载：服务、配置、凭据、内核（保留面板/脚本）
-#   sudo bash mybox-install.sh purge        完全卸载：以上全删 + 面板、脚本、备份、BBR 配置
-#        bash mybox-install.sh print-config 只打印将要生成的 config.json（免 root 预览）
-#        bash mybox-install.sh show-links   根据已保存凭据重新打印分享链接
+#   sudo bash my-vpn-install.sh install      安装或更新（可重复运行，凭据/端口不重置）
+#   sudo bash my-vpn-install.sh uninstall    普通卸载：服务、配置、凭据、内核（保留面板/脚本）
+#   sudo bash my-vpn-install.sh purge        完全卸载：以上全删 + 面板、脚本、备份、BBR 配置
+#        bash my-vpn-install.sh print-config 只打印将要生成的 config.json（免 root 预览）
+#        bash my-vpn-install.sh show-links   根据已保存凭据重新打印分享链接
 #
 # 可用环境变量覆盖（一般不用改）：
 #   SB_VERSION   sing-box 版本（默认锁定 1.14.4，不追 latest）
@@ -27,19 +27,19 @@
 #   PORT_VLESS / PORT_VMESS / PORT_ANYTLS / PORT_HY2 / PORT_TUIC
 #   REALITY_SNI  默认 apple.com ；CERT_CN 自签证书 CN，默认 www.bing.com
 #
-# 凭据保存在 /etc/mybox/credentials.env（权限 600），这是全套节点的总钥匙，
+# 凭据保存在 /etc/my-vpn/credentials.env（权限 600），这是全套节点的总钥匙，
 # 泄露等于五协议全泄露，请按私钥级别保管，不要外发。
 # =============================================================================
 set -euo pipefail
 
 SB_VERSION="${SB_VERSION:-1.14.4}"
-DIR="/etc/mybox"
+DIR="/etc/my-vpn"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
 CERT_FILE="${CERT_FILE:-$DIR/cert.pem}"
 KEY_FILE="${KEY_FILE:-$DIR/private.key}"
 BIN="/usr/local/bin/sing-box"
-UNIT="/etc/systemd/system/mybox.service"
+UNIT="/etc/systemd/system/my-vpn.service"
 
 # 端口不在这里写死：resolve_ports 按 环境变量 > ports.env > 现有 config.json > 随机 解析
 PORT_VLESS="${PORT_VLESS:-}"
@@ -51,9 +51,9 @@ PORTS_FILE="$DIR/ports.env"
 REALITY_SNI="${REALITY_SNI:-apple.com}"
 CERT_CN="${CERT_CN:-www.bing.com}"
 
-log()  { printf '\033[32m[mybox]\033[0m %s\n' "$*"; }
-warn() { printf '\033[33m[mybox]\033[0m %s\n' "$*"; }
-die()  { printf '\033[31m[mybox] 错误：\033[0m %s\n' "$*" >&2; exit 1; }
+log()  { printf '\033[32m[my-vpn]\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m[my-vpn]\033[0m %s\n' "$*"; }
+die()  { printf '\033[31m[my-vpn] 错误：\033[0m %s\n' "$*" >&2; exit 1; }
 
 need_root() { [ "$(id -u)" -eq 0 ] || die "需要 root 运行（sudo bash $0 $1）"; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -286,8 +286,8 @@ write_config() {
 import json, os, sys
 def e(k): return os.environ[k]
 tls = {"enabled": True,
-       "certificate_path": os.environ.get("CERT_FILE", "/etc/mybox/cert.pem"),
-       "key_path": os.environ.get("KEY_FILE", "/etc/mybox/private.key")}
+       "certificate_path": os.environ.get("CERT_FILE", "/etc/my-vpn/cert.pem"),
+       "key_path": os.environ.get("KEY_FILE", "/etc/my-vpn/private.key")}
 cfg = {
   "log": {"level": "info", "timestamp": True},
   "dns": {"servers": [{"type": "local", "tag": "local"}]},
@@ -364,7 +364,7 @@ ip = e("SERVER_IP_OUT")
 def q(s):  # URL 里密码可能含 +/=，做百分号编码
     from urllib.parse import quote
     return quote(s, safe="")
-vmess_obj = {"v": "2", "ps": "mybox-vmess", "add": ip, "port": str(e("PORT_VMESS")),
+vmess_obj = {"v": "2", "ps": "my-vpn-vmess", "add": ip, "port": str(e("PORT_VMESS")),
              "id": e("UUID_VMESS"), "aid": "0", "net": "ws",
              "path": e("VMESS_PATH"), "host": e("CERT_CN"), "tls": ""}
 if e("VMESS_TLS") in ("1", "true", "yes"):
@@ -378,13 +378,13 @@ hy2_obfs_q = f"&obfs=salamander&obfs-password={q(_hy2_obfs)}" if _hy2_obfs else 
 links = [
  f"vless://{e('UUID_VLESS')}@{ip}:{e('PORT_VLESS')}?encryption=none&flow=xtls-rprx-vision"
  f"&security=reality&sni={e('REALITY_SNI')}&fp=chrome&pbk={e('REALITY_PUB')}"
- f"&sid={e('SHORT_ID')}&type=tcp&headerType=none#mybox-vless",
+ f"&sid={e('SHORT_ID')}&type=tcp&headerType=none#my-vpn-vless",
  "vmess://" + base64.b64encode(json.dumps(vmess_obj).encode()).decode(),
- f"anytls://{q(e('PASS_ANYTLS'))}@{ip}:{e('PORT_ANYTLS')}/?insecure=1&sni={e('CERT_CN')}#mybox-anytls",
+ f"anytls://{q(e('PASS_ANYTLS'))}@{ip}:{e('PORT_ANYTLS')}/?insecure=1&sni={e('CERT_CN')}#my-vpn-anytls",
  f"hysteria2://{q(e('PASS_HY2'))}@{ip}:{e('PORT_HY2')}/?insecure=1&sni={e('CERT_CN')}"
- f"&alpn=h3{hy2_obfs_q}#mybox-hy2",
+ f"&alpn=h3{hy2_obfs_q}#my-vpn-hy2",
  f"tuic://{e('UUID_TUIC')}:{q(e('PASS_TUIC'))}@{ip}:{e('PORT_TUIC')}"
- f"?congestion_control=bbr&alpn=h3&sni={e('CERT_CN')}&allow_insecure=1#mybox-tuic",
+ f"?congestion_control=bbr&alpn=h3&sni={e('CERT_CN')}&allow_insecure=1#my-vpn-tuic",
 ]
 open(os.path.join(outdir, "links.txt"), "w").write("\n".join(links) + "\n")
 
@@ -398,7 +398,7 @@ log-level: info
 ipv6: true
 
 proxies:
-  - name: mybox-vless
+  - name: my-vpn-vless
     type: vless
     server: {ip}
     port: {e('PORT_VLESS')}
@@ -412,7 +412,7 @@ proxies:
     reality-opts:
       public-key: {yq(e('REALITY_PUB'))}
       short-id: {yq(e('SHORT_ID'))}
-  - name: mybox-vmess
+  - name: my-vpn-vmess
     type: vmess
     server: {ip}
     port: {e('PORT_VMESS')}
@@ -425,14 +425,14 @@ proxies:
       path: {yq(e('VMESS_PATH'))}
       headers:
         Host: {yq(e('CERT_CN'))}
-  - name: mybox-anytls
+  - name: my-vpn-anytls
     type: anytls
     server: {ip}
     port: {e('PORT_ANYTLS')}
     password: {yq(e('PASS_ANYTLS'))}
     sni: {e('CERT_CN')}
     skip-cert-verify: true
-  - name: mybox-hy2
+  - name: my-vpn-hy2
     type: hysteria2
     server: {ip}
     port: {e('PORT_HY2')}
@@ -440,7 +440,7 @@ proxies:
 {hy2_obfs_yaml}    alpn: [h3]
     sni: {e('CERT_CN')}
     skip-cert-verify: true
-  - name: mybox-tuic
+  - name: my-vpn-tuic
     type: tuic
     server: {ip}
     port: {e('PORT_TUIC')}
@@ -455,7 +455,7 @@ proxies:
 proxy-groups:
   - name: PROXY
     type: select
-    proxies: [mybox-vless, mybox-vmess, mybox-anytls, mybox-hy2, mybox-tuic, DIRECT]
+    proxies: [my-vpn-vless, my-vpn-vmess, my-vpn-anytls, my-vpn-hy2, my-vpn-tuic, DIRECT]
 
 rules:
   - GEOIP,CN,DIRECT
@@ -470,7 +470,7 @@ PY
 write_unit() {
   cat > "$UNIT" <<EOF
 [Unit]
-Description=mybox (sing-box, personal clean build)
+Description=my-vpn (sing-box, personal clean build)
 After=network-online.target
 Wants=network-online.target
 
@@ -530,14 +530,14 @@ do_install() {
   fi
   log "配置校验通过"
   write_unit
-  systemctl enable --now mybox >/dev/null 2>&1 || systemctl restart mybox
+  systemctl enable --now my-vpn >/dev/null 2>&1 || systemctl restart my-vpn
   open_firewall
   # 装后核验：以前这里只打印“完成”，服务起没起来、端口有没有在监听都不查，
   # 这次装完当场验，起不来直接报错停下，不留一个“看着装完了、其实连不上”的状态
-  if [ "$(systemctl is-active mybox 2>/dev/null)" != "active" ]; then
-    warn "mybox 服务未进入 active，最近日志："
-    journalctl -u mybox --no-pager -n 20 2>/dev/null || true
-    die "安装未完成：mybox 服务未正常运行，旧配置备份在 $DIR/backup/，先看日志再重装"
+  if [ "$(systemctl is-active my-vpn 2>/dev/null)" != "active" ]; then
+    warn "my-vpn 服务未进入 active，最近日志："
+    journalctl -u my-vpn --no-pager -n 20 2>/dev/null || true
+    die "安装未完成：my-vpn 服务未正常运行，旧配置备份在 $DIR/backup/，先看日志再重装"
   fi
   local missing_ports="" pp
   for pp in "$PORT_VLESS" "$PORT_VMESS" "$PORT_ANYTLS"; do
@@ -558,7 +558,7 @@ do_install() {
   else
     warn "未能自动探测公网 IP，跳过链接生成；用 SERVER_IP=x.x.x.x 重新运行 install 补生成"
   fi
-  systemctl --no-pager --lines=0 status mybox | head -n 5 || true
+  systemctl --no-pager --lines=0 status my-vpn | head -n 5 || true
   log "完成。链接与 Clash 配置在 $DIR/client/（600），凭据总钥匙在 $CREDS（600）"
 }
 
@@ -582,9 +582,9 @@ close_firewall() {
 do_uninstall() {
   need_root uninstall
   resolve_ports clean   # 先按 ports.env/config 读出实际端口，再删文件（保证 UFW 规则删对）
-  systemctl disable --now mybox 2>/dev/null || true
+  systemctl disable --now my-vpn 2>/dev/null || true
   rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true
-  systemctl reset-failed mybox 2>/dev/null || true
+  systemctl reset-failed my-vpn 2>/dev/null || true
   rm -f "$BIN" "$BIN.bak"
   close_firewall
   rm -rf "$DIR"
@@ -595,21 +595,21 @@ do_purge() { # 完全卸载：连面板、脚本、备份、BBR 持久化一并�
   need_root purge
   if [ "${1:-}" != "--yes" ] && [ -t 0 ]; then
     local ans
-    printf '完全卸载将删除 mybox 的一切（服务/配置/凭据/内核/面板/脚本/备份/BBR 配置），不可恢复。输入 PURGE 确认：'
+    printf '完全卸载将删除 my-vpn 的一切（服务/配置/凭据/内核/面板/脚本/备份/BBR 配置），不可恢复。输入 PURGE 确认：'
     read -r ans || exit 1
     [ "$ans" = "PURGE" ] || { log "已取消"; exit 0; }
   fi
   resolve_ports clean
-  systemctl disable --now mybox 2>/dev/null || true
+  systemctl disable --now my-vpn 2>/dev/null || true
   rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true
-  systemctl reset-failed mybox 2>/dev/null || true
-  rm -f "$BIN" "$BIN.bak" /usr/local/bin/mybox /root/mybox-install.sh /root/mybox-panel.sh
+  systemctl reset-failed my-vpn 2>/dev/null || true
+  rm -f "$BIN" "$BIN.bak" /usr/local/bin/my-vpn /root/my-vpn-install.sh /root/my-vpn-panel.sh
   close_firewall
-  rm -rf "$DIR" /root/mybox-backups
-  rm -f /etc/sysctl.d/99-mybox-bbr.conf /etc/modules-load.d/mybox-bbr.conf
+  rm -rf "$DIR" /root/my-vpn-backups
+  rm -f /etc/sysctl.d/99-my-vpn-bbr.conf /etc/modules-load.d/my-vpn-bbr.conf
   sysctl -w net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1 || true
   sysctl -w net.core.default_qdisc=fq_codel >/dev/null 2>&1 || true
-  log "完全卸载完成：mybox 服务、配置、凭据、内核、面板命令、脚本、备份与 BBR 配置均已清除"
+  log "完全卸载完成：my-vpn 服务、配置、凭据、内核、面板命令、脚本、备份与 BBR 配置均已清除"
 }
 
 do_print_config() {
@@ -660,6 +660,6 @@ case "${1:-}" in
   purge)        do_purge "${2:-}" ;;
   print-config) do_print_config ;;
   show-links)   need_root show-links; do_show_links ;;
-  status)       systemctl --no-pager status mybox | head -n 12; "$BIN" check -c "$CONF" && echo "config: OK" ;;
+  status)       systemctl --no-pager status my-vpn | head -n 12; "$BIN" check -c "$CONF" && echo "config: OK" ;;
   *) echo "用法： $0 {install|uninstall|purge|print-config|show-links|status}"; exit 1 ;;
 esac
