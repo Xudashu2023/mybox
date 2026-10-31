@@ -22,7 +22,7 @@
 #        bash mybox-install.sh show-links   根据已保存凭据重新打印分享链接
 #
 # 可用环境变量覆盖（一般不用改）：
-#   SB_VERSION   sing-box 版本（默认锁定 1.14.3，不追 latest）
+#   SB_VERSION   sing-box 版本（默认锁定 1.14.4，不追 latest）
 #   SERVER_IP    服务器公网 IP（默认自动探测，探测失败时必须手动指定）
 #   PORT_VLESS / PORT_VMESS / PORT_ANYTLS / PORT_HY2 / PORT_TUIC
 #   REALITY_SNI  默认 apple.com ；CERT_CN 自签证书 CN，默认 www.bing.com
@@ -32,7 +32,7 @@
 # =============================================================================
 set -euo pipefail
 
-SB_VERSION="${SB_VERSION:-1.14.3}"
+SB_VERSION="${SB_VERSION:-1.14.4}"
 DIR="/etc/mybox"
 CONF="$DIR/config.json"
 CREDS="$DIR/credentials.env"
@@ -321,6 +321,18 @@ cfg = {
   "outbounds": [{"type": "direct", "tag": "direct"}],
   "route": {"default_domain_resolver": "local", "final": "direct"},
 }
+# 全协议嗅探：与勇哥版对齐，域名分流类客户端不再因无嗅探而走偏。
+for _ib in cfg["inbounds"]:
+    _ib["sniff"] = True
+    _ib["sniff_override_destination"] = True
+# VMess TLS 开关：默认关（保持现有纯 WS 行为，老链接不变）；VMESS_TLS=1 时
+# 用同一张自签证书做 WS+TLS，客户端链接与 Clash 配置同步带 tls/sni。
+if os.environ.get("VMESS_TLS") in ("1", "true", "yes"):
+    for _ib in cfg["inbounds"]:
+        if _ib["type"] == "vmess":
+            _vmess_tls = dict(tls)
+            _vmess_tls["server_name"] = os.environ.get("CERT_CN", "www.bing.com")
+            _ib["tls"] = _vmess_tls
 with open(sys.argv[1], "w") as f:
     json.dump(cfg, f, indent=2)
 print("config written:", sys.argv[1])
@@ -341,7 +353,7 @@ write_client_files() {
   local ip="$1" outdir="$DIR/client"
   mkdir -p "$outdir"
   # 客户端生成靠环境变量传参，这里统一导出，避免 show-links 路径下端口为 None
-  export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC REALITY_SNI CERT_CN
+  export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC REALITY_SNI CERT_CN VMESS_TLS
   export UUID_VLESS UUID_VMESS UUID_TUIC PASS_ANYTLS PASS_HY2 PASS_TUIC PASS_OBFS
   export REALITY_PUB SHORT_ID VMESS_PATH
   SERVER_IP_OUT="$ip" python3 - "$outdir" <<'PY'
@@ -355,6 +367,14 @@ def q(s):  # URL 里密码可能含 +/=，做百分号编码
 vmess_obj = {"v": "2", "ps": "mybox-vmess", "add": ip, "port": str(e("PORT_VMESS")),
              "id": e("UUID_VMESS"), "aid": "0", "net": "ws",
              "path": e("VMESS_PATH"), "host": e("CERT_CN"), "tls": ""}
+if e("VMESS_TLS") in ("1", "true", "yes"):
+    vmess_obj["tls"] = "tls"
+    vmess_obj["sni"] = e("CERT_CN")
+# Hy2 混淆密码缺失时不崩：老安装（加混淆之前）服务端也没有混淆，链接里就
+# 不带 obfs 参数，与服务端保持一致；服务端要求混淆但凭据缺失的情况由
+# do_show_links 提前拦下，不会走到这里生成一条对不上的链接。
+_hy2_obfs = e("PASS_OBFS")
+hy2_obfs_q = f"&obfs=salamander&obfs-password={q(_hy2_obfs)}" if _hy2_obfs else ""
 links = [
  f"vless://{e('UUID_VLESS')}@{ip}:{e('PORT_VLESS')}?encryption=none&flow=xtls-rprx-vision"
  f"&security=reality&sni={e('REALITY_SNI')}&fp=chrome&pbk={e('REALITY_PUB')}"
@@ -362,13 +382,15 @@ links = [
  "vmess://" + base64.b64encode(json.dumps(vmess_obj).encode()).decode(),
  f"anytls://{q(e('PASS_ANYTLS'))}@{ip}:{e('PORT_ANYTLS')}/?insecure=1&sni={e('CERT_CN')}#mybox-anytls",
  f"hysteria2://{q(e('PASS_HY2'))}@{ip}:{e('PORT_HY2')}/?insecure=1&sni={e('CERT_CN')}"
- f"&obfs=salamander&obfs-password={q(e('PASS_OBFS'))}#mybox-hy2",
+ f"&alpn=h3{hy2_obfs_q}#mybox-hy2",
  f"tuic://{e('UUID_TUIC')}:{q(e('PASS_TUIC'))}@{ip}:{e('PORT_TUIC')}"
  f"?congestion_control=bbr&alpn=h3&sni={e('CERT_CN')}&allow_insecure=1#mybox-tuic",
 ]
 open(os.path.join(outdir, "links.txt"), "w").write("\n".join(links) + "\n")
 
 def yq(s): return "'" + str(s).replace("'", "''") + "'"
+vmess_tls_yaml = f"    tls: true\n    servername: {e('CERT_CN')}\n" if e("VMESS_TLS") in ("1", "true", "yes") else ""
+hy2_obfs_yaml = f"    obfs: salamander\n    obfs-password: {yq(e('PASS_OBFS'))}\n" if e("PASS_OBFS") else ""
 clash = f"""mixed-port: 7890
 allow-lan: false
 mode: rule
@@ -399,7 +421,7 @@ proxies:
     cipher: auto
     udp: true
     network: ws
-    ws-opts:
+{vmess_tls_yaml}    ws-opts:
       path: {yq(e('VMESS_PATH'))}
       headers:
         Host: {yq(e('CERT_CN'))}
@@ -415,9 +437,7 @@ proxies:
     server: {ip}
     port: {e('PORT_HY2')}
     password: {yq(e('PASS_HY2'))}
-    obfs: salamander
-    obfs-password: {yq(e('PASS_OBFS'))}
-    alpn: [h3]
+{hy2_obfs_yaml}    alpn: [h3]
     sni: {e('CERT_CN')}
     skip-cert-verify: true
   - name: mybox-tuic
@@ -503,7 +523,7 @@ do_install() {
     cp -a "$CONF" "$DIR/backup/config-$(date +%Y%m%d-%H%M%S).json"
     log "旧配置已备份到 $DIR/backup/"
   fi
-  export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC REALITY_SNI CERT_CN CERT_FILE KEY_FILE
+  export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC REALITY_SNI CERT_CN CERT_FILE KEY_FILE VMESS_TLS
   write_config
   if ! "$BIN" check -c "$CONF"; then
     die "新配置未通过 sing-box check，已保留备份，服务未重启"
@@ -610,7 +630,7 @@ do_print_config() {
     fi
   done
   export UUID_VLESS UUID_VMESS UUID_TUIC PASS_ANYTLS PASS_HY2 PASS_TUIC PASS_OBFS REALITY_PRIV SHORT_ID VMESS_PATH
-  export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC REALITY_SNI
+  export PORT_VLESS PORT_VMESS PORT_ANYTLS PORT_HY2 PORT_TUIC REALITY_SNI CERT_CN VMESS_TLS
   local tmp; tmp="$(mktemp)"
   CONF="$tmp" write_config >/dev/null
   cat "$tmp"; rm -f "$tmp"
@@ -620,7 +640,13 @@ do_show_links() {
   [ -f "$CREDS" ] || die "尚未安装（$CREDS 不存在）"
   set -a; . "$CREDS"; set +a
   resolve_ports clean
-  export CERT_CN
+  # 混淆一致性检查：服务端配置要求 salamander、但凭据里没有 PASS_OBFS
+  # （加混淆之前的老安装），此时只刷新链接会生成一条对不上的 Hy2 链接，
+  # 必须重跑 install：它会补生成混淆密码并同步重写服务端配置和链接。
+  if [ -z "${PASS_OBFS:-}" ] && [ -f "$CONF" ] && grep -q '"salamander"' "$CONF"; then
+    die "凭据里没有 Hy2 混淆密码（PASS_OBFS），但服务端配置要求 salamander 混淆，链接与服务端对不上。请重跑 install（凭据复用，会补生成混淆密码并同步重写配置和链接），不要只刷新链接"
+  fi
+  export CERT_CN VMESS_TLS
   local ip; ip="$(detect_ip)"
   [ -n "$ip" ] || die "探测不到公网 IP，请用 SERVER_IP=x.x.x.x 指定"
   export CERT_CN

@@ -68,7 +68,8 @@ hr() { printf "%s─────────────────────
 SERVER_IP=""
 PORT_VLESS=40136; PORT_VMESS=2082; PORT_ANYTLS=20917; PORT_HY2=41413; PORT_TUIC=59899
 REALITY_SNI="apple.com"; CERT_CN="www.bing.com"
-SB_VERSION="1.14.3"
+VMESS_TLS="0"
+SB_VERSION="1.14.4"
 [ -f "$PANEL_CONF" ] && . "$PANEL_CONF"
 # 安装脚本持久化的实际端口优先（首次安装随机生成，落在 ports.env，反映真实运行值）
 [ -f "$DIR/ports.env" ] && . "$DIR/ports.env"
@@ -84,12 +85,13 @@ save_panel_conf() {
     printf "PORT_TUIC='%s'\n"    "$PORT_TUIC"
     printf "REALITY_SNI='%s'\n"  "$REALITY_SNI"
     printf "CERT_CN='%s'\n"      "$CERT_CN"
+    printf "VMESS_TLS='%s'\n"   "$VMESS_TLS"
     printf "SB_VERSION='%s'\n"   "$SB_VERSION"
   } > "$PANEL_CONF"
 }
 
 run_script() { # 以当前面板设置调用安装脚本
-  SERVER_IP="$SERVER_IP" SB_VERSION="$SB_VERSION" \
+  SERVER_IP="$SERVER_IP" SB_VERSION="$SB_VERSION" VMESS_TLS="$VMESS_TLS" \
   PORT_VLESS="$PORT_VLESS" PORT_VMESS="$PORT_VMESS" PORT_ANYTLS="$PORT_ANYTLS" \
   PORT_HY2="$PORT_HY2" PORT_TUIC="$PORT_TUIC" \
   REALITY_SNI="$REALITY_SNI" CERT_CN="$CERT_CN" \
@@ -306,7 +308,7 @@ tests = {
  "anytls": {"type": "anytls", "tag": "o", "password": creds["PASS_ANYTLS"],
             "tls": {"enabled": True, "server_name": e["CERT_CN"], "insecure": True}},
  "hy2": {"type": "hysteria2", "tag": "o", "password": creds["PASS_HY2"],
-         "tls": {"enabled": True, "server_name": e["CERT_CN"], "insecure": True}},
+         "tls": {"enabled": True, "server_name": e["CERT_CN"], "insecure": True, "alpn": ["h3"]}},
  "tuic": {"type": "tuic", "tag": "o", "uuid": creds["UUID_TUIC"], "password": creds["PASS_TUIC"],
           "congestion_control": "bbr",
           "tls": {"enabled": True, "server_name": e["CERT_CN"], "insecure": True, "alpn": ["h3"]}},
@@ -509,6 +511,8 @@ edit_settings() {
   printf "TUIC 端口 [%s]: "   "$PORT_TUIC";   read -r v || return 0; [ -n "$v" ] && PORT_TUIC="$v"
   printf "REALITY SNI [%s]: " "$REALITY_SNI"; read -r v || return 0; [ -n "$v" ] && REALITY_SNI="$v"
   printf "证书 CN [%s]: "     "$CERT_CN";     read -r v || return 0; [ -n "$v" ] && CERT_CN="$v"
+  printf "VMess TLS（1=开，0=关，默认关） [%s]: " "$VMESS_TLS"; read -r v || return 0
+  case "$v" in 0|1) VMESS_TLS="$v" ;; "") ;; *) warn "只接受 0 或 1，已保持不变" ;; esac
   save_panel_conf && ok "已保存"
   if confirm "现在重跑 install 让新设置生效（凭据不变）？"; then run_script install; else echo "下次重装时生效。"; fi
 }
@@ -828,7 +832,7 @@ menu_list() {
   printf "   %s11%s  %sBBR 加速%s      %s一键开启原版 BBR + FQ%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   echo
   printf "  %s设 置  ·  SETTINGS%s\n" "$gray" "$R"
-  printf "   %s12%s  %s参数设置%s      %sIP 优先 / 端口 / SNI / 证书域名%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
+  printf "   %s12%s  %s参数设置%s      %sIP 优先 / 端口 / SNI / 证书域名 / VMess TLS%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   printf "   %s13%s  %s更新中心%s      %s脚本 / 面板 / 内核版本管理%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   printf "   %s14%s  %s备份恢复%s      %s配置与凭据打包 / 恢复%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
   printf "   %s15%s  %s卸载节点%s      %s普通卸载 / 完全卸载%s\n" "$n" "$R" "$t" "$R" "$d" "$R"
