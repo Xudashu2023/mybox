@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# My-vpn 面板 v2 —— 在服务器上输入 my-vpn 调出（安装到 /usr/local/bin/my-vpn）
+# My-vpn 面板 v2 —— 在服务器上输入 mv 调出（my-vpn 也一样）（安装到 /usr/local/bin/my-vpn）
 #
 # 彩色仪表盘 + 功能菜单。所有装/改/卸仍走 my-vpn-install.sh 的子命令，
 # 面板只是交互外壳，配置与凭据始终只有一份真相。
@@ -780,6 +780,7 @@ panel_purge() { # 面板自带完全卸载：不依赖安装脚本版本，逐�
   fi
   rm -rf "$DIR" /root/my-vpn-backups
   rm -f "$SCRIPT" /root/my-vpn-install.sh /root/my-vpn-panel.sh
+  if [ -f /usr/local/bin/mv.my-vpn-bak ]; then /bin/mv /usr/local/bin/mv.my-vpn-bak /usr/local/bin/mv; else rm -f /usr/local/bin/mv; fi
   rm -f /etc/sysctl.d/99-my-vpn-bbr.conf /etc/modules-load.d/my-vpn-bbr.conf
   sysctl -w net.ipv4.tcp_congestion_control=cubic >/dev/null 2>&1 || true
   sysctl -w net.core.default_qdisc=fq_codel >/dev/null 2>&1 || true

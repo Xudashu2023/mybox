@@ -38,4 +38,19 @@ if [ -n "${SERVER_IP:-}" ]; then
   fi
 fi
 
-echo "[my-vpn] 全部完成！输入 my-vpn 打开面板（选 1 看节点链接，选 5 节点测速）"
+echo "[my-vpn] 4/4 安装 mv 快捷入口…"
+# mv 本身是系统移动命令，不能直接拿面板覆盖它，否则面板自己的更新
+#（mv 新脚本 旧脚本）和系统里所有调 mv 的地方都会坏。所以这里只装一个
+#包装：无参数时打开 my-vpn 面板，带参数时原样交给 /bin/mv。
+if [ -f /usr/local/bin/mv ] && ! grep -q 'my-vpn 快捷入口' /usr/local/bin/mv 2>/dev/null; then
+  /bin/mv /usr/local/bin/mv /usr/local/bin/mv.my-vpn-bak
+  echo "[my-vpn] /usr/local/bin/mv 已有非本项目文件，已备份到 /usr/local/bin/mv.my-vpn-bak"
+fi
+cat > /usr/local/bin/mv <<'EOF'
+#!/usr/bin/env bash
+# my-vpn 快捷入口：无参数时打开 my-vpn 面板；带参数时就是系统 mv。
+if [ "$#" -eq 0 ]; then exec /usr/local/bin/my-vpn; else exec /bin/mv "$@"; fi
+EOF
+chmod 755 /usr/local/bin/mv
+echo "[my-vpn] mv 快捷入口已装好：直接输 mv 进面板，mv 文件1 文件2 仍是系统移动"
+echo "[my-vpn] 全部完成！输入 mv 打开面板（my-vpn 也一样；选 1 看节点链接，选 5 节点测速）"

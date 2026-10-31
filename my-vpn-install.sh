@@ -604,6 +604,8 @@ do_purge() { # 完全卸载：连面板、脚本、备份、BBR 持久化一并�
   rm -f "$UNIT"; systemctl daemon-reload 2>/dev/null || true
   systemctl reset-failed my-vpn 2>/dev/null || true
   rm -f "$BIN" "$BIN.bak" /usr/local/bin/my-vpn /root/my-vpn-install.sh /root/my-vpn-panel.sh
+  # 清理 mv 快捷入口：有备份就恢复原文件，没有就直接删包装（只动 /usr/local/bin 下的包装，不动 /bin/mv）
+  if [ -f /usr/local/bin/mv.my-vpn-bak ]; then /bin/mv /usr/local/bin/mv.my-vpn-bak /usr/local/bin/mv; else rm -f /usr/local/bin/mv; fi
   close_firewall
   rm -rf "$DIR" /root/my-vpn-backups
   rm -f /etc/sysctl.d/99-my-vpn-bbr.conf /etc/modules-load.d/my-vpn-bbr.conf
